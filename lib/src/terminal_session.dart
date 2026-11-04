@@ -11,6 +11,8 @@ class TerminalSession extends ChangeNotifier {
   StreamSubscription<String>? _subscription;
   int? exitCode;
   bool _disposed = false;
+  bool _stopping = false;
+  Future<void>? _closing;
   bool get running => _pty != null && exitCode == null;
   int? get pid => _pty?.pid;
 
@@ -50,8 +52,8 @@ class TerminalSession extends ChangeNotifier {
     terminal.onOutput = write;
     terminal.onResize = (w, h, pw, ph) => pty.resize(h, w);
     pty.exitCode.then((code) {
-      if (_disposed) return;
       exitCode = code;
+      if (_disposed) return;
       terminal.write('\r\n[Process exited: $code]\r\n');
       notifyListeners();
     });
@@ -65,7 +67,48 @@ class TerminalSession extends ChangeNotifier {
 
   void interrupt() => write('\x03');
   void stop() {
-    if (running) _pty!.kill();
+    if (!running || _stopping) return;
+    _stopping = true;
+    _closing = _hangup();
+  }
+
+  Future<void> close() {
+    stop();
+    return _closing ?? Future<void>.value();
+  }
+
+  Future<void> _hangup() async {
+    final processId = pid!;
+    if (Platform.isWindows) {
+      await Process.run('taskkill', ['/PID', '$processId', '/T', '/F']);
+      return;
+    }
+    if (!Platform.isWindows) {
+      try {
+        // Job-control shells give foreground jobs separate process groups.
+        // Send HUP to all members of this PTY, preserving nohup's ignored HUP.
+        final result = await Process.run('/bin/ps', ['-axo', 'pid=,tty=']);
+        final rows = (result.stdout as String)
+            .split('\n')
+            .map((line) => line.trim().split(RegExp(r'\s+')))
+            .where((row) => row.length == 2)
+            .toList();
+        final own = rows.where((row) => row[0] == '$processId').firstOrNull;
+        if (own != null && own[1] != '??' && own[1] != '?') {
+          for (final row in rows.where(
+            (row) => row[1] == own[1] && row[0] != '$processId',
+          )) {
+            Process.killPid(int.parse(row[0]), ProcessSignal.sighup);
+          }
+        }
+        if (exitCode == null) Process.killPid(processId, ProcessSignal.sighup);
+      } catch (_) {
+        /* Fall back to terminating the shell. */
+      }
+    }
+    if (exitCode == null) _pty!.kill();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (exitCode == null) _pty!.kill(ProcessSignal.sigkill);
   }
 
   Map<String, dynamic> snapshot() => {

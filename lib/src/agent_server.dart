@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -8,10 +9,18 @@ class AgentServer {
     required this.read,
     required this.write,
     required this.interrupt,
+    this.list,
+    this.readTerminal,
+    this.writeTerminal,
+    this.interruptTerminal,
   });
+  final List<Map<String, dynamic>> Function()? list;
+  final Map<String, dynamic> Function(String)? readTerminal;
+  final FutureOr<void> Function(String, String)? writeTerminal;
+  final FutureOr<void> Function(String)? interruptTerminal;
   final Map<String, dynamic> Function() read;
-  final void Function(String) write;
-  final void Function() interrupt;
+  final FutureOr<void> Function(String) write;
+  final FutureOr<void> Function() interrupt;
   final token = List.generate(
     32,
     (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
@@ -34,8 +43,11 @@ class AgentServer {
       if (request.headers.value('authorization') != 'Bearer $token') {
         response.statusCode = 401;
         response.write(jsonEncode({'error': 'Unauthorized'}));
+      } else if (request.method == 'GET' && request.uri.path == '/terminals') {
+        response.write(jsonEncode({'terminals': list?.call() ?? []}));
       } else if (request.method == 'GET' && request.uri.path == '/terminal') {
-        response.write(jsonEncode(read()));
+        final id = request.uri.queryParameters['terminal_id'];
+        response.write(jsonEncode(id == null ? read() : _read(id)));
       } else if (request.method == 'POST' && request.uri.path == '/input') {
         final bytes = <int>[];
         await for (final chunk in request.timeout(const Duration(seconds: 5))) {
@@ -48,10 +60,22 @@ class AgentServer {
         if (body is! Map || body['text'] is! String) {
           throw const FormatException('Expected text string');
         }
-        write(body['text'] as String);
+        final id = request.uri.queryParameters['terminal_id'];
+        if (id == null) {
+          await write(body['text'] as String);
+        } else {
+          _read(id);
+          await writeTerminal!(id, body['text'] as String);
+        }
         response.write('{"ok":true}');
       } else if (request.method == 'POST' && request.uri.path == '/interrupt') {
-        interrupt();
+        final id = request.uri.queryParameters['terminal_id'];
+        if (id == null) {
+          await interrupt();
+        } else {
+          _read(id);
+          await interruptTerminal!(id);
+        }
         response.write('{"ok":true}');
       } else {
         response.statusCode = 404;
@@ -66,6 +90,13 @@ class AgentServer {
     } finally {
       await response.close();
     }
+  }
+
+  Map<String, dynamic> _read(String id) {
+    if (readTerminal == null) {
+      throw StateError('Targeted terminals unavailable');
+    }
+    return readTerminal!(id);
   }
 
   Future<void> close() async => _server?.close(force: true);

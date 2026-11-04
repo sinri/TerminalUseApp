@@ -10,6 +10,9 @@ class MainFlutterWindow: NSWindow {
     self.minSize = NSSize(width: 720, height: 640)
     self.title = "Terminal Use"
 
+    AppDelegate.lifecycleChannel = FlutterMethodChannel(
+      name: "terminal_use/lifecycle",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()

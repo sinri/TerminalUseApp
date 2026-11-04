@@ -15,6 +15,16 @@ void main() {
       read: () => {'text': 'hello', 'running': true},
       write: inputs.add,
       interrupt: () => interrupted = true,
+      list: () => [
+        {'id': 'a', 'name': 'first'},
+        {'id': 'b', 'name': 'second'},
+      ],
+      readTerminal: (id) {
+        if (!['a', 'b'].contains(id)) throw StateError('closed');
+        return {'id': id, 'text': id};
+      },
+      writeTerminal: (id, text) => inputs.add('$id:$text'),
+      interruptTerminal: (id) => inputs.add('$id:interrupt'),
     );
     await server.start();
     client = HttpClient();
@@ -51,6 +61,25 @@ void main() {
     await send('POST', '/interrupt', body: {});
     expect(interrupted, isTrue);
   });
+  test(
+    'explicit terminal IDs route independently and closed IDs never fall back',
+    () async {
+      expect((await send('GET', '/terminals')).$2['terminals'].length, 2);
+      expect((await send('GET', '/terminal?terminal_id=b')).$2['text'], 'b');
+      await send('POST', '/input?terminal_id=b', body: {'text': 'pwd\r'});
+      await send('POST', '/interrupt?terminal_id=a', body: {});
+      expect(inputs, ['b:pwd\r', 'a:interrupt']);
+      expect(
+        (await send(
+          'POST',
+          '/input?terminal_id=closed',
+          body: {'text': 'bad'},
+        )).$1,
+        409,
+      );
+      expect(inputs.length, 2);
+    },
+  );
   test('rejects malformed and oversized requests without input', () async {
     expect((await send('POST', '/input', body: {'text': 3})).$1, 400);
     expect((await send('POST', '/input', body: {'text': 'a' * 66000})).$1, 400);

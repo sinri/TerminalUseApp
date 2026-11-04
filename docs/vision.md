@@ -6,7 +6,12 @@
 
 允许用户使用复制粘贴操作。
 
-左侧设置纵向 tab 列，可切换多个命令行终端。
+左侧设置纵向 tab 列，可切换多个命令行终端。Tab 上提供关闭按钮，允许改名。
+关闭 Tab 时，对应命令行终端内的进程和连接应关闭（除走 nohup 等的进程）。
+
+允许用户创建 SSH 入口，快捷打开 Tab 免于手输 ssh 命令；
+支持指定用户名通过 KEY 登录（默认走 ~/.ssh 下的 rsa 文件，也可以指定 key 的文件路径）或密码登录；设置保存于本地。
+远程 SSH 时自动加上心跳等参数保持活动连接。
 
 ## Terminal MCP
 
@@ -15,12 +20,6 @@
 在 App 关闭后，MCP 服务停止。
 
 ## Terminal Use
-
-### Outside Me
-
-外部 Agent 工具，如 Codex 和 OpenCode 等，可以便捷挂载 Terminal MCP，在本 App 运行时进行 Terminal Use 操作。
-
-需要在 App 内给出使用步骤指导。
 
 ### Inside Me
 

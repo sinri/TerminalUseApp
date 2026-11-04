@@ -5,25 +5,186 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:terminal_use_app/main.dart';
+import 'package:terminal_use_app/src/internal_agent_view.dart';
+import 'package:terminal_use_app/src/settings.dart';
 import 'package:terminal_use_app/src/agent_server.dart';
-import 'package:terminal_use_app/src/agent_launcher.dart';
 import 'package:terminal_use_app/src/terminal_session.dart';
+import 'package:terminal_use_app/src/terminal_workspace.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('desktop workspace renders', (tester) async {
     await tester.pumpWidget(const TerminalUseApp());
     await tester.pump(const Duration(seconds: 2));
-    expect(find.text('TERMINAL USE'), findsOneWidget);
-    expect(find.text('Agent bridge ready'), findsOneWidget);
-    expect(find.text('启动 OpenCode'), findsOneWidget);
-    expect(find.text('启动 Codex'), findsOneWidget);
-    expect(find.byType(TextField), findsNothing);
-    await tester.tap(find.text('高级：其他启动命令'));
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(TextField), findsOneWidget);
-    await tester.ensureVisible(find.byType(TextField));
+    final send = find.text('发送');
+    final input = find.byType(TextField);
+    final grip = find.byKey(const Key('agent-input-divider'));
+    final contextBox = find.byKey(const Key('agent-context'));
+    final initialHeight = tester.getSize(input).height;
+    expect(initialHeight, 112);
+    expect(find.text('当前 Tab：Terminal 1（terminal-1）'), findsOneWidget);
+    await tester.drag(grip, const Offset(0, -1000));
+    await tester.pump();
+    expect(tester.getSize(input).height, greaterThan(initialHeight));
+    expect(
+      tester.getSize(contextBox).height,
+      greaterThanOrEqualTo(tester.getSize(find.byType(Scaffold)).height / 2),
+    );
+    await tester.drag(grip, const Offset(0, 1000));
+    await tester.pump();
+    expect(tester.getSize(input).height, lessThanOrEqualTo(initialHeight));
+    final tabsDivider = find.byKey(const Key('tabs-divider'));
+    final tabsX = tester.getTopLeft(tabsDivider).dx;
+    final agentX = tester.getTopLeft(input).dx;
+    await tester.drag(tabsDivider, const Offset(80, 0));
+    await tester.pump();
+    expect(tester.getTopLeft(tabsDivider).dx, greaterThan(tabsX));
+    expect(tester.getTopLeft(input).dx, agentX);
+    await tester.drag(tabsDivider, const Offset(-160, 0));
+    await tester.pump();
+    expect(tester.getTopLeft(tabsDivider).dx, tabsX);
+    final initialX = tester.getTopLeft(input).dx;
+    expect(tester.getTopLeft(find.byTooltip('新建终端')).dx, lessThan(initialX));
+    expect(
+      tester.getTopLeft(input).dy,
+      greaterThan(tester.getTopLeft(find.text('发送消息，开始终端运维会话。')).dy),
+    );
+    await tester.drag(
+      find.byKey(const Key('panel-divider')),
+      const Offset(-60, 0),
+    );
+    await tester.pump();
+    expect(tester.getTopLeft(input).dx, lessThan(initialX));
+    await tester.tap(find.byTooltip('新建终端'));
+    await tester.pump();
+    expect(find.text('Terminal 2'), findsOneWidget);
+    expect(find.text('当前 Tab：Terminal 2（terminal-2）'), findsOneWidget);
+    await tester.enterText(input, '请检查 @');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, 'terminal-1'));
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(input).controller!.text,
+      '请检查 @terminal-1 ',
+    );
+    await tester.tap(find.byTooltip('打开 SSH'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('管理 SSH 入口'));
+    await tester.pumpAndSettle();
+    expect(find.text('添加 SSH 入口'), findsOneWidget);
+    expect(find.text('添加 LLM 配置'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Agent 设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('添加 LLM 配置'), findsOneWidget);
+    expect(find.text('添加 SSH 入口'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.enterText(input, '检查磁盘');
+    await tester.tap(find.byTooltip('新建 Agent 会话'));
+    await tester.pump();
+    expect(find.text('检查磁盘'), findsNothing);
+    tester.view.physicalSize = const Size(720, 640);
+    tester.view.devicePixelRatio = 1;
+    await tester.pump();
+    expect(send, findsOneWidget);
     expect(tester.takeException(), isNull);
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+  testWidgets('approval stays in conversation while settings remain usable', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const TerminalUseApp());
+    await tester.pump(const Duration(seconds: 1));
+    final panel = tester.widget<InternalAgentView>(
+      find.byType(InternalAgentView),
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      await request.drain<void>();
+      request.response.write(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {
+                'content': jsonEncode({
+                  'level': 'low',
+                  'syntax': 'valid',
+                  'syntax_reason': '语法完整',
+                  'explanation': '显示当前目录路径',
+                  'reason': '查看当前路径',
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      await request.response.close();
+    });
+    final model = LlmProfile(
+      name: 'mock',
+      model: 'mock',
+      endpoint: 'http://127.0.0.1:${server.port}',
+      auth: 'none',
+    );
+    try {
+      for (final allow in [false, true]) {
+        await tester.tap(find.byTooltip('Agent 设置'));
+        await tester.pumpAndSettle();
+        final result = panel.agent.approvals
+            .check(panel.workspace.selected!, 'terminal_run', 'pwd\r', (
+              model,
+              'mock',
+            ))
+            .then((_) => 'approved', onError: (Object e) => e.toString());
+        for (var i = 0; i < 50 && panel.agent.approvals.pending == null; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.pumpAndSettle();
+        expect(panel.agent.approvals.pending, isNotNull);
+        expect(find.text('确认终端操作 · 低风险'), findsNothing);
+        expect(find.text('添加 LLM 配置'), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('agent-context')),
+            matching: find.text('确认终端操作 · 低风险'),
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(find.text(allow ? '允许本次执行' : '拒绝'));
+        await tester.pumpAndSettle();
+        expect(await result, allow ? 'approved' : '你已拒绝本次操作，未执行。');
+        expect(find.text('确认终端操作 · 低风险'), findsNothing);
+        expect(find.text('手动同意 · 低风险'), allow ? findsOneWidget : findsNothing);
+        expect(find.text('允许本次执行'), findsNothing);
+      }
+      panel.settings.autoAllow.add(CommandRisk.low);
+      await panel.agent.approvals.check(
+        panel.workspace.selected!,
+        'terminal_run',
+        'pwd\r',
+        (model, 'mock'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('自动放行 · 低风险'), findsOneWidget);
+      await tester.tap(find.text('自动放行 · 低风险'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('风险依据：查看当前路径'), findsOneWidget);
+      await tester.tap(find.text('自动放行 · 低风险'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('风险依据：查看当前路径'), findsNothing);
+      expect(find.text('手动同意 · 低风险'), findsOneWidget);
+      expect(find.text('允许本次执行'), findsNothing);
+    } finally {
+      await server.close(force: true);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
   });
   testWidgets('MCP bridge controls a real PTY with persistent shell state', (
     tester,
@@ -72,8 +233,8 @@ void main() {
         }
 
         try {
-          await call(1, 'terminal_input', {
-            'text': "export TERMINAL_USE_SMOKE=shared_state\r",
+          await call(1, 'terminal_run', {
+            'command': "export TERMINAL_USE_SMOKE=shared_state",
           });
           await Future<void>.delayed(const Duration(milliseconds: 500));
           await call(2, 'terminal_input', {
@@ -104,56 +265,106 @@ void main() {
       terminal.dispose();
     }
   });
-  if (const bool.fromEnvironment('TEST_INSTALLED_AGENTS')) {
-    for (final choice in BuiltInAgent.values) {
-      testWidgets('${choice.name} discovers bundled MCP tools', (tester) async {
-        final shell = TerminalSession();
-        final cli = TerminalSession();
-        final api = AgentServer(
-          read: shell.snapshot,
-          write: shell.write,
-          interrupt: shell.interrupt,
+  testWidgets(
+    'multi-tab targeting survives selection changes and closes child jobs',
+    (tester) async {
+      final workspace = TerminalWorkspace();
+      await tester.runAsync(() async {
+        final dir = await Directory.systemTemp.createTemp(
+          'terminal-close-test-',
         );
-        AgentLaunch? launch;
+        final childFile = File('${dir.path}/child');
+        final detachedFile = File('${dir.path}/detached');
+        int? detachedPid;
+        final first = workspace.add();
+        final second = workspace.add();
+        final api = AgentServer(
+          read: first.session.snapshot,
+          write: first.session.write,
+          interrupt: first.session.interrupt,
+          list: () => workspace.tabs.map((t) => t.snapshot()).toList(),
+          readTerminal: (id) => workspace.require(id).snapshot(),
+          writeTerminal: (id, text) =>
+              workspace.require(id).session.write(text),
+          interruptTerminal: (id) => workspace.require(id).session.interrupt(),
+        );
         try {
-          shell.start();
-          await tester.runAsync(() async {
-            await api.start();
-            launch = await AgentLauncher.prepare(choice, api.environment);
-          });
-          cli.start(
-            executable: launch!.executable,
-            arguments: launch!.arguments,
-            environment: launch!.environment,
+          await api.start();
+          final result = await Process.run('python3', [
+            'tools/terminal_bridge.py',
+            'input',
+            "printf 'TARGET_%s_END\\n' ONE\r",
+            '--terminal-id',
+            first.id,
+          ], environment: api.environment);
+          expect(result.exitCode, 0, reason: '${result.stderr}');
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+          expect(first.session.snapshot()['text'], contains('TARGET_ONE_END'));
+          expect(
+            second.session.snapshot()['text'],
+            isNot(contains('TARGET_ONE_END')),
           );
-          await tester.runAsync(() async {
-            final marker = File(
-              launch!.environment['TERMINAL_USE_MCP_STATUS']!,
-            );
-            var connected = false;
-            for (var i = 0; i < 100; i++) {
-              await Future<void>.delayed(const Duration(milliseconds: 200));
-              if (await marker.exists() &&
-                  (await marker.readAsString()).contains('tools_listed')) {
-                connected = true;
-                break;
-              }
-            }
-            expect(
-              connected,
-              isTrue,
-              reason: '${choice.name} output: ${cli.terminal.buffer.getText()}',
-            );
-          });
+          first.session.write(
+            "nohup sleep 60 </dev/null > /dev/null 2>&1 & echo \$! > ${detachedFile.path}\r",
+          );
+          for (var i = 0; i < 30 && !await detachedFile.exists(); i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          expect(await detachedFile.exists(), isTrue);
+          detachedPid = int.parse((await detachedFile.readAsString()).trim());
+          // Foreground jobs have their own process group under an interactive shell.
+          first.session.write(
+            "sh -c 'echo \$\$ > ${childFile.path}; exec sleep 60'\r",
+          );
+          for (var i = 0; i < 30 && !await childFile.exists(); i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+          expect(await childFile.exists(), isTrue);
+          final childPid = int.parse((await childFile.readAsString()).trim());
+          workspace.close(first.id);
+          await Future<void>.delayed(const Duration(seconds: 1));
+          final childStatus = await Process.run('/bin/ps', [
+            '-p',
+            '$childPid',
+            '-o',
+            'stat=',
+          ]);
+          expect(
+            (childStatus.stdout as String).trim(),
+            isEmpty,
+            reason: 'Closing Tab must terminate foreground child',
+          );
+          expect(second.session.running, isTrue);
+          final detachedStatus = await Process.run('/bin/ps', [
+            '-p',
+            '$detachedPid',
+            '-o',
+            'stat=',
+          ]);
+          expect(
+            (detachedStatus.stdout as String).trim(),
+            isNotEmpty,
+            reason: 'Closing Tab must preserve a nohup job',
+          );
+          final closed = await Process.run('python3', [
+            'tools/terminal_bridge.py',
+            'input',
+            'echo BAD\r',
+            '--terminal-id',
+            first.id,
+          ], environment: api.environment);
+          expect(closed.exitCode, isNot(0));
+          expect(
+            second.session.snapshot()['text'],
+            isNot(contains('echo BAD')),
+          );
         } finally {
-          cli.dispose();
-          shell.dispose();
-          await tester.runAsync(() async {
-            await api.close();
-            await launch?.dispose();
-          });
+          if (detachedPid != null) Process.killPid(detachedPid);
+          await api.close();
+          workspace.dispose();
+          await dir.delete(recursive: true);
         }
       });
-    }
-  }
+    },
+  );
 }

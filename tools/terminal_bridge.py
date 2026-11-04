@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import urllib.request
+import urllib.parse
 from pathlib import Path
 
 
@@ -17,24 +18,48 @@ def request(path, body=None):
         'Authorization': 'Bearer ' + os.environ['TERMINAL_USE_TOKEN'],
         'Content-Type': 'application/json',
     })
-    with urllib.request.urlopen(req, timeout=10) as response:
+    with urllib.request.urlopen(req, timeout=None if body is not None else 10) as response:
         return json.load(response)
 
 
+def tool(name, description, field=None):
+    properties = {}
+    if name != 'terminal_list':
+        properties['terminal_id'] = {'type': 'string', 'description': 'Stable ID from terminal_list.'}
+    if field:
+        properties[field] = {'type': 'string'}
+    return {'name': name, 'description': description, 'inputSchema': {
+        'type': 'object', 'properties': properties, 'required': [field] if field else [],
+        'additionalProperties': False}}
+
+
 TOOLS = [
-    {'name': 'terminal_read', 'description': 'Read the shared terminal rendered screen and scrollback, process status, rows and columns. Commands are asynchronous; poll this after input.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
-    {'name': 'terminal_input', 'description': 'Send exact text/keys to the shared PTY. Append \\r to submit a shell command. This has full local shell privileges. Check the terminal first.', 'inputSchema': {'type': 'object', 'properties': {'text': {'type': 'string'}}, 'required': ['text'], 'additionalProperties': False}},
-    {'name': 'terminal_interrupt', 'description': 'Send Ctrl+C to the shared terminal foreground process.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
+    tool('terminal_list', 'List open terminal tabs and their stable IDs.'),
+    tool('terminal_read', 'Read terminal output. Poll after submitting a command.'),
+    tool('terminal_run', 'Execute a shell command in this terminal by typing it and pressing Enter. Pass the command without a newline. Execution is asynchronous.', 'command'),
+    tool('terminal_input', 'Send raw keystrokes for interactive programs. For shell commands use terminal_run.', 'text'),
+    tool('terminal_interrupt', 'Send Ctrl+C to the foreground process.'),
 ]
 
 
 def call(name, arguments):
+    if name == 'terminal_list':
+        return request('/terminals')
+    target = arguments.get('terminal_id')
+    if target is not None and not isinstance(target, str):
+        raise ValueError('terminal_id must be a string')
+    suffix = '' if target is None else '?' + urllib.parse.urlencode({'terminal_id': target})
     if name == 'terminal_read':
-        return request('/terminal')
+        return request('/terminal' + suffix)
+    if name == 'terminal_run':
+        command = arguments['command']
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError('Expected a non-empty command')
+        return request('/input' + suffix, {'text': command.rstrip('\r\n') + '\r'})
     if name == 'terminal_input':
-        return request('/input', {'text': arguments['text']})
+        return request('/input' + suffix, {'text': arguments['text']})
     if name == 'terminal_interrupt':
-        return request('/interrupt', {})
+        return request('/interrupt' + suffix, {})
     raise ValueError('Unknown tool: ' + name)
 
 
@@ -54,7 +79,7 @@ def serve():
                 continue
             method = message.get('method')
             if method == 'initialize':
-                result = {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'terminal-use', 'version': '0.1.0'}, 'instructions': 'Use terminal_read, terminal_input and terminal_interrupt for the shared terminal. Read before acting. Append a carriage return (\\r) to submit a command; poll terminal_read to check results. The user also operates this terminal.'}
+                result = {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'terminal-use', 'version': '0.1.0'}, 'instructions': 'Use terminal_list to choose a stable terminal_id, read the terminal, execute shell commands with terminal_run, and poll terminal_read to verify results. Use terminal_input only for raw keystrokes. The user also operates this terminal.'}
                 record_status('initialized')
             elif method == 'ping':
                 result = {}
@@ -78,14 +103,15 @@ def serve():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['read', 'input', 'interrupt', 'mcp'])
+    parser.add_argument('action', choices=['list', 'read', 'input', 'interrupt', 'mcp'])
     parser.add_argument('text', nargs='?', default='')
+    parser.add_argument('--terminal-id')
     args = parser.parse_args()
     if args.action == 'mcp':
         serve()
     else:
-        name = {'read': 'terminal_read', 'input': 'terminal_input', 'interrupt': 'terminal_interrupt'}[args.action]
-        print(json.dumps(call(name, {'text': args.text}), ensure_ascii=False, indent=2))
+        name = {'list': 'terminal_list', 'read': 'terminal_read', 'input': 'terminal_input', 'interrupt': 'terminal_interrupt'}[args.action]
+        print(json.dumps(call(name, {'text': args.text, **({'terminal_id': args.terminal_id} if args.terminal_id else {})}), ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__':
