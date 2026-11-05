@@ -3,13 +3,26 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:terminal_use_app/main.dart';
 import 'package:terminal_use_app/src/internal_agent_view.dart';
 import 'package:terminal_use_app/src/settings.dart';
+import 'package:terminal_use_app/src/mac_controls.dart';
 import 'package:terminal_use_app/src/agent_server.dart';
 import 'package:terminal_use_app/src/terminal_session.dart';
 import 'package:terminal_use_app/src/terminal_workspace.dart';
+
+Future<dynamic> nativeEdit(String action) async {
+  const codec = StandardMethodCodec();
+  final reply = Completer<ByteData?>();
+  ServicesBinding.instance.channelBuffers.push(
+    'terminal_use/lifecycle',
+    codec.encodeMethodCall(MethodCall('edit:$action')),
+    reply.complete,
+  );
+  return codec.decodeEnvelope((await reply.future)!);
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -22,13 +35,91 @@ void main() {
     final contextBox = find.byKey(const Key('agent-context'));
     final initialHeight = tester.getSize(input).height;
     expect(initialHeight, 112);
+    final initialPanel = tester.widget<InternalAgentView>(
+      find.byType(InternalAgentView),
+    );
+    expect(initialPanel.workspace.tabs, isEmpty);
+    expect(find.text('0 个终端'), findsOneWidget);
+    expect(find.text('无活跃 Tab'), findsOneWidget);
+    expect(
+      tester.widget<MacButton>(find.widgetWithText(MacButton, '发送')).onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('新建终端'));
+    await tester.pump();
     expect(find.text('当前 Tab：Terminal 1（terminal-1）'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '中文',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pump();
+    expect(
+      initialPanel.workspace.selected!.session.snapshot()['text'],
+      isNot(contains('中文')),
+    );
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '中文',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      initialPanel.workspace.selected!.session.snapshot()['text'],
+      contains('中文'),
+    );
+    initialPanel.workspace.selected!.session.interrupt();
+
+    final previousClipboard = await Clipboard.getData(Clipboard.kTextPlain);
+    try {
+      await Clipboard.setData(const ClipboardData(text: 'echo NATIVE_CLIP_中文'));
+      expect(await nativeEdit('paste'), isTrue);
+      initialPanel.workspace.selected!.session.write('\r');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        initialPanel.workspace.selected!.session.snapshot()['text'],
+        contains('NATIVE_CLIP_中文'),
+      );
+      await tester.tap(find.text('Terminal 1'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(await nativeEdit('selectAll'), isTrue);
+      expect(await nativeEdit('copy'), isTrue);
+      expect(
+        (await Clipboard.getData(Clipboard.kTextPlain))?.text,
+        contains('NATIVE_CLIP_中文'),
+      );
+      await tester.tap(input);
+      await tester.pump();
+      await Clipboard.setData(const ClipboardData(text: 'AGENT_CLIP_中文'));
+      expect(
+        await nativeEdit('paste'),
+        isTrue,
+        reason: 'Native editing must route to the focused Agent text field',
+      );
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(input).controller?.text,
+        contains('AGENT_CLIP_中文'),
+      );
+      await tester.enterText(input, '');
+    } finally {
+      await Clipboard.setData(
+        ClipboardData(text: previousClipboard?.text ?? ''),
+      );
+    }
+
     await tester.drag(grip, const Offset(0, -1000));
     await tester.pump();
     expect(tester.getSize(input).height, greaterThan(initialHeight));
     expect(
       tester.getSize(contextBox).height,
-      greaterThanOrEqualTo(tester.getSize(find.byType(Scaffold)).height / 2),
+      greaterThanOrEqualTo(
+        tester.getSize(find.byType(InternalAgentView)).height / 2,
+      ),
     );
     await tester.drag(grip, const Offset(0, 1000));
     await tester.pump();
@@ -42,12 +133,12 @@ void main() {
     expect(tester.getTopLeft(input).dx, agentX);
     await tester.drag(tabsDivider, const Offset(-160, 0));
     await tester.pump();
-    expect(tester.getTopLeft(tabsDivider).dx, tabsX);
+    expect(tester.getTopLeft(tabsDivider).dx, lessThan(tabsX));
     final initialX = tester.getTopLeft(input).dx;
     expect(tester.getTopLeft(find.byTooltip('新建终端')).dx, lessThan(initialX));
     expect(
       tester.getTopLeft(input).dy,
-      greaterThan(tester.getTopLeft(find.text('发送消息，开始终端运维会话。')).dy),
+      greaterThan(tester.getTopLeft(find.text('一起处理终端任务')).dy),
     );
     await tester.drag(
       find.byKey(const Key('panel-divider')),
@@ -59,8 +150,13 @@ void main() {
     await tester.pump();
     expect(find.text('Terminal 2'), findsOneWidget);
     expect(find.text('当前 Tab：Terminal 2（terminal-2）'), findsOneWidget);
+    // New-terminal focus is applied after its first frame.
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(input);
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.enterText(input, '请检查 @');
     await tester.pump();
+    expect(tester.widget<TextField>(input).controller!.text, '请检查 @');
     await tester.tap(find.widgetWithText(ListTile, 'terminal-1'));
     await tester.pump();
     expect(
@@ -73,14 +169,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('添加 SSH 入口'), findsOneWidget);
     expect(find.text('添加 LLM 配置'), findsNothing);
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('关闭设置'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Agent 设置'));
     await tester.pumpAndSettle();
     expect(find.text('添加 LLM 配置'), findsOneWidget);
     expect(find.text('添加 SSH 入口'), findsNothing);
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('关闭设置'));
     await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('关闭设置'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('关闭设置'), findsNothing);
     await tester.enterText(input, '检查磁盘');
     await tester.tap(find.byTooltip('新建 Agent 会话'));
     await tester.pump();
@@ -92,6 +196,16 @@ void main() {
     expect(tester.takeException(), isNull);
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
+    await tester.pump();
+    await tester.tap(find.text('Terminal 1'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('关闭 Terminal 1'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('关闭 Terminal 2'));
+    await tester.pump();
+    expect(initialPanel.workspace.tabs, isEmpty);
+    expect(find.text('新建终端'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
   });
@@ -100,6 +214,8 @@ void main() {
   ) async {
     await tester.pumpWidget(const TerminalUseApp());
     await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.byTooltip('新建终端'));
+    await tester.pump();
     final panel = tester.widget<InternalAgentView>(
       find.byType(InternalAgentView),
     );
@@ -146,9 +262,9 @@ void main() {
         }
         await tester.pumpAndSettle();
         expect(panel.agent.approvals.pending, isNotNull);
-        expect(find.text('确认终端操作 · 低风险'), findsNothing);
+        expect(find.text('确认终端操作 · 低风险').hitTestable(), findsNothing);
         expect(find.text('添加 LLM 配置'), findsOneWidget);
-        await tester.pageBack();
+        await tester.tap(find.byTooltip('关闭设置'));
         await tester.pumpAndSettle();
         expect(
           find.descendant(
@@ -298,7 +414,17 @@ void main() {
             first.id,
           ], environment: api.environment);
           expect(result.exitCode, 0, reason: '${result.stderr}');
-          await Future<void>.delayed(const Duration(milliseconds: 600));
+          // Login-shell initialization can exceed 600 ms on a busy desktop.
+          for (
+            var i = 0;
+            i < 50 &&
+                !(first.session.snapshot()['text'] as String).contains(
+                  'TARGET_ONE_END',
+                );
+            i++
+          ) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
           expect(first.session.snapshot()['text'], contains('TARGET_ONE_END'));
           expect(
             second.session.snapshot()['text'],

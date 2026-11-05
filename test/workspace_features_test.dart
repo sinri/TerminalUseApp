@@ -22,6 +22,149 @@ class MemorySession extends TerminalSession {
 }
 
 void main() {
+  for (final protocol in ['openai', 'anthropic']) {
+    test(
+      '$protocol truncated assessment never authorizes even valid partial JSON',
+      () async {
+        final session = MemorySession();
+        final workspace = TerminalWorkspace()
+          ..tabs.add(TerminalTab('a', 'test', session));
+        final settings = AppSettings()..autoAllow.addAll(CommandRisk.values);
+        final agent = InternalAgent(workspace, settings: settings);
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((request) async {
+          final body = jsonDecode(await utf8.decoder.bind(request).join());
+          expect(body['max_tokens'], 16384);
+          // Provider-specific extensions must not leak to arbitrary services.
+          expect(body.containsKey('thinking'), isFalse);
+          final risk = jsonEncode({
+            'syntax': 'valid',
+            'syntax_reason': 'valid',
+            'level': 'low',
+            'explanation': 'read',
+            'reason': 'read',
+          });
+          request.response.write(
+            jsonEncode(
+              protocol == 'openai'
+                  ? {
+                      'choices': [
+                        {
+                          'finish_reason': 'length',
+                          'message': {'content': risk},
+                        },
+                      ],
+                      'usage': {'completion_tokens': 16384},
+                    }
+                  : {
+                      'stop_reason': 'max_tokens',
+                      'content': [
+                        {'type': 'text', 'text': risk},
+                      ],
+                      'usage': {'output_tokens': 16384},
+                    },
+            ),
+          );
+          await request.response.close();
+        });
+        final profile = LlmProfile(
+          name: 'mock',
+          endpoint: 'http://127.0.0.1:${server.port}/v1',
+          model: 'mock',
+          protocol: protocol,
+        );
+        try {
+          await expectLater(
+            agent.approvals.check(
+              workspace.require('a'),
+              'terminal_run',
+              'pwd\r',
+              (profile, 'mock'),
+            ),
+            throwsA(
+              isA<RiskAssessmentFailure>().having(
+                (e) => e.message,
+                'message',
+                contains('token 上限'),
+              ),
+            ),
+          );
+          expect(session.inputs, isEmpty);
+          expect(agent.approvals.pending, isNull);
+          expect(agent.log.whereType<ApprovedOperation>(), isEmpty);
+        } finally {
+          agent.dispose();
+          workspace.dispose();
+          await server.close(force: true);
+        }
+      },
+    );
+  }
+
+  test(
+    'empty risk assessment ends the turn without writing and permits another message',
+    () async {
+      final session = MemorySession();
+      final workspace = TerminalWorkspace()
+        ..tabs.add(TerminalTab('a', 'test', session));
+      final agent = InternalAgent(workspace);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var requests = 0;
+      server.listen((request) async {
+        await request.drain<void>();
+        requests++;
+        final message = requests == 1
+            ? {
+                'tool_calls': [
+                  {
+                    'id': 'call-1',
+                    'type': 'function',
+                    'function': {
+                      'name': 'terminal_run',
+                      'arguments': '{"command":"pwd"}',
+                    },
+                  },
+                ],
+              }
+            : {'content': requests == 2 ? '' : '可以继续'};
+        request.response.write(
+          jsonEncode({
+            'choices': [
+              {'message': message},
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      final profile = LlmProfile(
+        name: 'mock',
+        endpoint: 'http://127.0.0.1:${server.port}/v1/chat/completions',
+        model: 'mock',
+      );
+      try {
+        await agent.run(profile, 'inspect', 'a', SkillCatalog(''));
+        expect(requests, 2);
+        expect(session.inputs, isEmpty);
+        expect(agent.running, isFalse);
+        expect(agent.activeTool, isNull);
+        expect(agent.approvals.pending, isNull);
+        expect(agent.status, contains('可以继续输入'));
+        expect(
+          agent.log.whereType<ToolActivity>().single.result,
+          contains('没有返回风险评估正文'),
+        );
+        await agent.run(profile, '继续', 'a', SkillCatalog(''));
+        expect(requests, 3);
+        expect(agent.log.last, '可以继续');
+        expect(agent.running, isFalse);
+      } finally {
+        agent.dispose();
+        workspace.dispose();
+        await server.close(force: true);
+      }
+    },
+  );
+
   test(
     'tool cards format transport fields while preserving literal output',
     () {
@@ -564,6 +707,7 @@ void main() {
                         'message': {
                           'role': 'assistant',
                           'content': null,
+                          'reasoning_content': 'tool reasoning to preserve',
                           'tool_calls': [
                             {
                               'id': 'call-1',
@@ -585,6 +729,14 @@ void main() {
           } else {
             expect(jsonEncode(body['messages']), contains('call-1'));
             expect(jsonEncode(body['messages']), contains('ok'));
+            if (!anthropic) {
+              expect(
+                (body['messages'] as List).firstWhere(
+                  (m) => m['role'] == 'assistant',
+                )['reasoning_content'],
+                'tool reasoning to preserve',
+              );
+            }
             req.response.write(
               jsonEncode(
                 anthropic

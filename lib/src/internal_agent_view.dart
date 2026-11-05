@@ -1,6 +1,11 @@
 import 'card_text.dart';
 import 'terminal_approval.dart';
 import 'package:flutter/material.dart';
+import 'api_error_view.dart';
+import 'api_request.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
+import 'mac_controls.dart';
 import 'internal_agent.dart';
 import 'settings.dart';
 import 'terminal_workspace.dart';
@@ -15,7 +20,9 @@ class InternalAgentView extends StatefulWidget {
     required this.configure,
     required this.settings,
     required this.workspace,
+    this.inputFocus,
   });
+  final FocusNode? inputFocus;
   final TextEditingController task;
   final ModelChoice? selected;
   final ValueChanged<ModelChoice?> select;
@@ -28,7 +35,7 @@ class InternalAgentView extends StatefulWidget {
 }
 
 class _InternalAgentViewState extends State<InternalAgentView> {
-  double desiredInputHeight = 112;
+  double desiredInputHeight = 136;
 
   Widget _mentionMenu(TextEditingValue value) {
     final caret = value.selection.extentOffset;
@@ -75,10 +82,11 @@ class _InternalAgentViewState extends State<InternalAgentView> {
     );
   }
 
-  final _focus = FocusNode();
+  final _localFocus = FocusNode(debugLabel: 'Agent input');
+  FocusNode get _focus => widget.inputFocus ?? _localFocus;
   @override
   void dispose() {
-    _focus.dispose();
+    _localFocus.dispose();
     super.dispose();
   }
 
@@ -87,7 +95,7 @@ class _InternalAgentViewState extends State<InternalAgentView> {
     ApprovedOperation? approved,
   }) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -113,13 +121,15 @@ class _InternalAgentViewState extends State<InternalAgentView> {
           if (approved == null)
             Wrap(
               children: [
-                TextButton(
+                MacButton(
                   onPressed: () => widget.agent.approvals.decide(review, false),
-                  child: const Text('拒绝'),
+                  label: '拒绝',
                 ),
-                OutlinedButton(
+                const SizedBox(width: 8),
+                MacButton(
                   onPressed: () => widget.agent.approvals.decide(review, true),
-                  child: const Text('允许本次执行'),
+                  label: '允许本次执行',
+                  primary: true,
                 ),
               ],
             ),
@@ -179,6 +189,7 @@ class _InternalAgentViewState extends State<InternalAgentView> {
         ),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
         children: [
+          if (activity?.apiFailure != null) ApiErrorView(activity!.apiFailure!),
           Align(
             alignment: Alignment.centerLeft,
             child: SelectableText(
@@ -220,230 +231,378 @@ class _InternalAgentViewState extends State<InternalAgentView> {
           : models.firstOrNull;
       final task = widget.task;
       final active = widget.workspace.selected;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(0, 4, 8, 8),
-        child: LayoutBuilder(
-          builder: (context, panel) => Column(
-            children: [
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Agent 设置',
-                    onPressed: widget.configure,
-                    icon: const Icon(Icons.settings_outlined),
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
+              _submit(selected, active),
+          const SingleActivator(LogicalKeyboardKey.period, meta: true): () {
+            if (a.running) a.stop();
+          },
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
+          child: LayoutBuilder(
+            builder: (context, panel) => Column(
+              children: [
+                Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
                   ),
-                  const Expanded(child: Center(child: Text('Agent'))),
-                  IconButton(
-                    tooltip: '新建 Agent 会话',
-                    onPressed: a.running
-                        ? null
-                        : () {
-                            a.newConversation();
-                            task.clear();
-                          },
-                    icon: const Icon(Icons.auto_awesome_outlined),
-                  ),
-                ],
-              ),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, body) {
-                    const handleHeight = 12.0;
-                    final maxHeight =
-                        (body.maxHeight -
-                                handleHeight -
-                                panel.maxHeight / 2 -
-                                6)
-                            .clamp(0.0, body.maxHeight);
-                    final minHeight = 48.0.clamp(0.0, maxHeight);
-                    final inputHeight = desiredInputHeight.clamp(
-                      minHeight,
-                      maxHeight,
-                    );
-                    return Column(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            key: const Key("agent-context"),
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.white24),
-                            ),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                SingleChildScrollView(
-                                  reverse: true,
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      if (a.log.isEmpty && review == null)
-                                        const SelectableText('发送消息，开始终端运维会话。'),
-                                      for (final entry in a.log)
-                                        if (entry is ToolActivity)
-                                          if (identical(entry, a.activeTool) &&
-                                              review != null &&
-                                              !review.external)
-                                            _approvalCard(review)
-                                          else
-                                            _activityCard(entry, entry.approval)
-                                        else if (entry is ApprovedOperation)
-                                          _activityCard(null, entry)
-                                        else
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 8,
-                                            ),
-                                            child: SelectableText(
-                                              entry as String,
-                                            ),
-                                          ),
-                                      if (review != null &&
-                                          (review.external ||
-                                              a.activeTool == null))
-                                        _approvalCard(review),
-                                    ],
-                                  ),
-                                ),
-                                Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child:
-                                      ValueListenableBuilder<TextEditingValue>(
-                                        valueListenable: task,
-                                        builder: (_, value, _) =>
-                                            _mentionMenu(value),
-                                      ),
-                                ),
-                              ],
-                            ),
+                  child: Row(
+                    children: [
+                      const Icon(CupertinoIcons.sparkles, size: 14),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'Agent',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        MouseRegion(
-                          cursor: SystemMouseCursors.resizeRow,
-                          child: GestureDetector(
+                      ),
+                      if (a.running)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: Text('运行中', style: TextStyle(fontSize: 11)),
+                        ),
+                      MacButton(
+                        tooltip: 'Agent 设置',
+                        onPressed: widget.configure,
+                        icon: CupertinoIcons.gear,
+                        toolbar: true,
+                      ),
+                      MacButton(
+                        tooltip: '新建 Agent 会话',
+                        onPressed: a.running
+                            ? null
+                            : () {
+                                a.newConversation();
+                                task.clear();
+                              },
+                        icon: CupertinoIcons.square_pencil,
+                        toolbar: true,
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, body) {
+                      const handleHeight = 8.0;
+                      final maxHeight =
+                          (body.maxHeight -
+                                  handleHeight -
+                                  panel.maxHeight / 2 -
+                                  6)
+                              .clamp(0.0, body.maxHeight);
+                      final minHeight = 72.0.clamp(0.0, maxHeight);
+                      final inputHeight = desiredInputHeight.clamp(
+                        minHeight,
+                        maxHeight,
+                      );
+                      return Column(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              key: const Key("agent-context"),
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerLowest,
+                              ),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  SingleChildScrollView(
+                                    reverse: a.log.isNotEmpty || review != null,
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        if (a.log.isEmpty && review == null)
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 16,
+                                              horizontal: 8,
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Icon(
+                                                  CupertinoIcons.chat_bubble_2,
+                                                  size: 20,
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.primary,
+                                                ),
+                                                const SizedBox(height: 16),
+                                                const Text(
+                                                  '一起处理终端任务',
+                                                  style: TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  active == null
+                                                      ? '先新建终端，再描述需要完成的任务。'
+                                                      : '描述任务，Agent 将在当前终端协助执行。\n输入 @ 可切换目标终端。',
+                                                  style: TextStyle(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        for (final entry in a.log)
+                                          if (entry is ToolActivity)
+                                            if (identical(
+                                                  entry,
+                                                  a.activeTool,
+                                                ) &&
+                                                review != null &&
+                                                !review.external)
+                                              _approvalCard(review)
+                                            else
+                                              _activityCard(
+                                                entry,
+                                                entry.approval,
+                                              )
+                                          else if (entry is ApprovedOperation)
+                                            _activityCard(null, entry)
+                                          else if (entry is ApiRequestFailure)
+                                            ApiErrorView(entry)
+                                          else if (entry is AgentText)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 8,
+                                              ),
+                                              child: SelectableText(
+                                                '${entry.text}${entry.complete
+                                                    ? ""
+                                                    : a.running
+                                                    ? "▍"
+                                                    : "\n（输出未完成）"}',
+                                              ),
+                                            )
+                                          else
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 8,
+                                              ),
+                                              child: SelectableText(
+                                                entry as String,
+                                              ),
+                                            ),
+                                        if (review != null &&
+                                            (review.external ||
+                                                a.activeTool == null))
+                                          _approvalCard(review),
+                                      ],
+                                    ),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child:
+                                        ValueListenableBuilder<
+                                          TextEditingValue
+                                        >(
+                                          valueListenable: task,
+                                          builder: (_, value, _) =>
+                                              _mentionMenu(value),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          MacSplitHandle(
                             key: const Key('agent-input-divider'),
-                            behavior: HitTestBehavior.opaque,
-                            onVerticalDragUpdate: (e) => setState(
+                            axis: Axis.vertical,
+                            label: '任务输入区高度',
+                            onReset: () =>
+                                setState(() => desiredInputHeight = 136),
+                            onDelta: (dy) => setState(
                               () => desiredInputHeight =
                                   (desiredInputHeight.clamp(
                                             minHeight,
                                             maxHeight,
                                           ) -
-                                          e.delta.dy)
+                                          dy)
                                       .clamp(minHeight, maxHeight),
                             ),
-                            child: const SizedBox(
-                              width: double.infinity,
-                              height: handleHeight,
-                              child: Center(
-                                child: SizedBox(
-                                  width: 32,
-                                  child: Divider(height: 1, thickness: 2),
-                                ),
+                          ),
+                          SizedBox(
+                            height: inputHeight,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  SizedBox(
+                                    height:
+                                        (MediaQuery.textScalerOf(
+                                                      context,
+                                                    ).scale(12) *
+                                                    1.4 +
+                                                6)
+                                            .clamp(24.0, 60.0),
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Text(
+                                        active == null
+                                            ? '无活跃 Tab'
+                                            : '当前 Tab：${active.name}（${active.id}）',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall!
+                                            .copyWith(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: task,
+                                      focusNode: _focus,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium!
+                                          .copyWith(fontSize: 13, height: 1.4),
+                                      expands: true,
+                                      minLines: null,
+                                      maxLines: null,
+                                      textAlignVertical: TextAlignVertical.top,
+                                      decoration: InputDecoration(
+                                        hintText: '描述任务…  ⌘↵ 发送',
+                                        hintMaxLines: 2,
+                                        hintStyle: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium!
+                                            .copyWith(
+                                              fontSize: 13,
+                                              height: 1.4,
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                        ),
-                        SizedBox(
-                          height: inputHeight,
-                          child: TextField(
-                            controller: task,
-                            focusNode: _focus,
-                            expands: true,
-                            minLines: null,
-                            maxLines: null,
-                            textAlignVertical: TextAlignVertical.top,
-                            decoration: InputDecoration(
-                              floatingLabelBehavior:
-                                  FloatingLabelBehavior.always,
-                              label: Text(
-                                active == null
-                                    ? '无活跃 Tab'
-                                    : '当前 Tab：${active.name}（${active.id}）',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              hintText: '输入 @ 选择 Tab',
-                              border: const OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                        ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButton<ModelChoice>(
-                      isExpanded: true,
-                      value: selected,
-                      hint: const Text('选择模型'),
-                      items: [
-                        for (final m in models)
-                          DropdownMenuItem(
-                            value: m,
-                            child: Text(
-                              '${m.$2} · ${m.$1.name}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: a.running ? null : widget.select,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      review != null ? '等待你确认本次终端操作' : a.status,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: a.running
-                        ? a.stop
-                        : selected == null || widget.workspace.selected == null
-                        ? null
-                        : () {
-                            final message = task.text.trim();
-                            if (message.isEmpty) return;
-                            final mentions =
-                                RegExp(r'@(terminal-\d+)(?![A-Za-z0-9_-])')
-                                    .allMatches(message)
-                                    .map((m) => m.group(1)!)
-                                    .toSet();
-                            if (mentions.length > 1) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('每条消息只能指定一个目标 Tab'),
-                                ),
-                              );
-                              return;
-                            }
-                            final explicit = mentions.firstOrNull;
-                            if (explicit != null &&
-                                !widget.workspace.tabs.any(
-                                  (t) => t.id == explicit,
-                                )) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('找不到 Tab：$explicit')),
-                              );
-                              return;
-                            }
-                            task.clear();
-                            a.run(
-                              selected.$1,
-                              message,
-                              explicit ?? active!.id,
-                              SkillCatalog(widget.settings.skillRoot),
-                              modelId: selected.$2,
-                            );
-                          },
-                    child: Text(a.running ? '停止' : '发送'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: MacPopup<ModelChoice>(
+                          tooltip: '选择模型',
+                          expanded: true,
+                          label: selected == null
+                              ? '选择模型'
+                              : '${selected.$2} · ${selected.$1.name}',
+                          value: selected,
+                          entries: [
+                            for (final m in models)
+                              MacMenuEntry(m, '${m.$2} · ${m.$1.name}'),
+                          ],
+                          onSelected: a.running ? null : widget.select,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: task,
+                        builder: (_, value, _) => MacButton(
+                          tooltip: a.running ? '停止后续操作（⌘.）' : '发送任务（⌘↵）',
+                          onPressed: a.running
+                              ? a.stop
+                              : selected == null ||
+                                    active == null ||
+                                    value.text.trim().isEmpty
+                              ? null
+                              : () => _submit(selected, active),
+                          label: a.running ? '停止' : '发送',
+                          primary: !a.running,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       );
     },
   );
+
+  void _submit(ModelChoice? selected, TerminalTab? active) {
+    final a = widget.agent;
+    if (a.running || selected == null || active == null) return;
+    if (!widget.task.value.composing.isCollapsed) return;
+    final message = widget.task.text.trim();
+    if (message.isEmpty) return;
+    final mentions = RegExp(
+      r'@(terminal-\d+)(?![A-Za-z0-9_-])',
+    ).allMatches(message).map((m) => m.group(1)!).toSet();
+    String? error;
+    if (mentions.length > 1) error = '每条消息只能指定一个目标 Tab';
+    final explicit = mentions.firstOrNull;
+    if (explicit != null &&
+        !widget.workspace.tabs.any((t) => t.id == explicit)) {
+      error = '找不到 Tab：$explicit';
+    }
+    if (error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    widget.task.clear();
+    a.run(
+      selected.$1,
+      message,
+      explicit ?? active.id,
+      SkillCatalog(widget.settings.skillRoot),
+      modelId: selected.$2,
+    );
+  }
 }

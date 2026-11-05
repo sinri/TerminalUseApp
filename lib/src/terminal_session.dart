@@ -87,7 +87,10 @@ class TerminalSession extends ChangeNotifier {
       try {
         // Job-control shells give foreground jobs separate process groups.
         // Send HUP to all members of this PTY, preserving nohup's ignored HUP.
-        final result = await Process.run('/bin/ps', ['-axo', 'pid=,tty=']);
+        final result = await Process.run('/bin/ps', [
+          '-axo',
+          'pid=,tty=',
+        ]).timeout(const Duration(milliseconds: 500));
         final rows = (result.stdout as String)
             .split('\n')
             .map((line) => line.trim().split(RegExp(r'\s+')))
@@ -107,8 +110,12 @@ class TerminalSession extends ChangeNotifier {
       }
     }
     if (exitCode == null) _pty!.kill();
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (exitCode == null) _pty!.kill(ProcessSignal.sigkill);
+    // Finish promptly when the shell exits; the grace period is an upper bound.
+    try {
+      await _pty!.exitCode.timeout(const Duration(milliseconds: 500));
+    } on TimeoutException {
+      if (exitCode == null) _pty!.kill(ProcessSignal.sigkill);
+    }
   }
 
   Map<String, dynamic> snapshot() => {

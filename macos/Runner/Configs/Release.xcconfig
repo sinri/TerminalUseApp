@@ -1,2 +1,8 @@
 #include "../../Flutter/Flutter-Release.xcconfig"
 #include "Warnings.xcconfig"
+
+// Build Release/Profile for the host Mac by default. The current Xcode lipo
+// rejects Flutter 3.41's multi-architecture -verify_arch invocation even when
+// both slices are present. Use arm64 on Apple Silicon and x86_64 on Intel.
+ARCHS = $(NATIVE_ARCH_ACTUAL)
+ONLY_ACTIVE_ARCH = YES

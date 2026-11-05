@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:async';
+import 'agent_trace.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'settings.dart';
 import 'model_request.dart';
+import 'api_request.dart';
 import 'terminal_approval.dart';
 import 'card_text.dart';
 import 'terminal_workspace.dart';
@@ -82,7 +85,13 @@ class ToolActivity {
   Map<String, dynamic>? arguments;
   ApprovedOperation? approval;
   String? result;
+  ApiRequestFailure? apiFailure;
   bool failed = false;
+}
+
+class AgentText {
+  String text = '';
+  bool complete = false;
 }
 
 /// Both model protocols dispatch through the same terminal tools as the MCP bridge.
@@ -107,12 +116,14 @@ class InternalAgent extends ChangeNotifier {
     if (running) return;
     _history.clear();
     log.clear();
+    status = '就绪，可以输入任务';
     notifyListeners();
   }
 
   final log = <Object>[];
   String? targetId;
   bool running = false;
+  String status = '就绪，可以输入任务';
   bool _cancelled = false;
   bool _disposed = false;
   HttpClient? _client;
@@ -216,10 +227,20 @@ class InternalAgent extends ChangeNotifier {
         }
         await _authorize(target, name, text);
         session.write(text);
+        agentTrace('terminal.write', {
+          'target': target,
+          'tool': name,
+          'text': text,
+        });
         return {'ok': true};
       case 'terminal_interrupt':
         await _authorize(target, name, '\x03');
         session.interrupt();
+        agentTrace('terminal.write', {
+          'target': target,
+          'tool': name,
+          'text': '\x03',
+        });
         return {'ok': true};
       default:
         throw StateError('未知工具：$name');
@@ -243,8 +264,32 @@ class InternalAgent extends ChangeNotifier {
     String target,
     SkillCatalog skills, {
     String? modelId,
+  }) => runZoned(
+    () => _run(profile, task, target, skills, modelId: modelId),
+    zoneValues: {
+      agentTraceRunKey:
+          'run-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}',
+      agentTraceSecretsKey: [
+        profile.apiKey,
+        ...Uri.parse(profile.endpoint).queryParameters.values,
+      ],
+    },
+  );
+
+  Future<void> _run(
+    LlmProfile profile,
+    String task,
+    String target,
+    SkillCatalog skills, {
+    String? modelId,
   }) async {
     if (running) return;
+    agentTrace('agent.start', {
+      'target': target,
+      'service': profile.name,
+      'model': modelId ?? profile.model,
+      'task': task,
+    });
     _model = (profile, modelId ?? profile.model);
     targetId = target;
     running = true;
@@ -295,32 +340,59 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
         if (_cancelled) break;
         workspace.require(target);
         final definitions = tools(skills);
-        final response = await modelRequest(_client!, profile, {
-          'model': modelId ?? profile.model,
-          'messages': messages,
-          if (anthropic) 'system': system,
-          'max_tokens': 4096,
-          'tools': anthropic
-              ? definitions
-                    .map(
-                      (t) => {
-                        'name': t['name'],
-                        'description': t['description'],
-                        'input_schema': t['parameters'],
-                      },
-                    )
-                    .toList()
-              : definitions
-                    .map((t) => {'type': 'function', 'function': t})
-                    .toList(),
-        });
+        agentTrace('agent.turn', {'turn': turn + 1, 'target': target});
+        status = '正在等待模型回复…';
+        if (!_disposed) notifyListeners();
+        AgentText? liveText;
+        final response = await modelRequest(
+          _client!,
+          profile,
+          {
+            'model': modelId ?? profile.model,
+            'messages': messages,
+            if (anthropic) 'system': system,
+            'max_tokens': 4096,
+            'tools': anthropic
+                ? definitions
+                      .map(
+                        (t) => {
+                          'name': t['name'],
+                          'description': t['description'],
+                          'input_schema': t['parameters'],
+                        },
+                      )
+                      .toList()
+                : definitions
+                      .map((t) => {'type': 'function', 'function': t})
+                      .toList(),
+          },
+          onDelta: (kind, text) {
+            if (_cancelled || _disposed) return;
+            if (kind == 'text' && text.isNotEmpty) {
+              if (liveText == null) {
+                liveText = AgentText();
+                log.add(liveText!);
+              }
+              liveText!.text += text;
+              status = '正在接收模型回复…';
+            } else if (kind == 'reasoning') {
+              status = '模型正在思考…';
+            } else if (kind == 'tool') {
+              status = '正在接收工具参数…';
+            }
+            notifyListeners();
+          },
+        );
+        liveText?.complete = true;
         if (_cancelled) break;
         final calls = <Map<String, dynamic>>[];
         if (anthropic) {
           final content = response['content'] as List;
           messages.add({'role': 'assistant', 'content': content});
           for (final block in content) {
-            if (block['type'] == 'text') _record(block['text'] as String);
+            if (block['type'] == 'text' && liveText == null) {
+              _record(block['text'] as String);
+            }
             if (block['type'] == 'tool_use') {
               calls.add({
                 'id': block['id'],
@@ -336,10 +408,12 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
           messages.add({
             'role': 'assistant',
             'content': message['content'],
+            if (message['reasoning_content'] != null)
+              'reasoning_content': message['reasoning_content'],
             if (message['tool_calls'] != null)
               'tool_calls': message['tool_calls'],
           });
-          if (message['content'] is String) {
+          if (message['content'] is String && liveText == null) {
             _record(message['content'] as String);
           }
           for (final call in message['tool_calls'] as List? ?? []) {
@@ -357,10 +431,18 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
                     .map((b) => b['text'])
                     .join('\n')
               : response['choices'][0]['message']['content'];
-          if (reply is String && reply.isNotEmpty) {
+          if (reply is! String || reply.trim().isEmpty) {
+            throw const FormatException('模型返回了空回复，且没有工具调用。请重试或切换模型。');
+          }
+          if (reply.isNotEmpty) {
             _history.addAll([
               {'role': 'user', 'content': enrichedTask},
-              {'role': 'assistant', 'content': reply},
+              {
+                'role': 'assistant',
+                'content': reply,
+                if (!anthropic && messages.last['reasoning_content'] != null)
+                  'reasoning_content': messages.last['reasoning_content'],
+              },
             ]);
           }
           return;
@@ -373,6 +455,7 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
           var failed = false;
           final activity = ToolActivity(call['name'] as String, target);
           activeTool = activity;
+          status = '正在处理工具：${activity.name}…';
           _record(activity);
           try {
             final raw = call['args'];
@@ -380,23 +463,53 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
               (raw is String ? jsonDecode(raw) : raw) as Map,
             );
             activity.arguments = args;
-            final result = await execute(
-              call['name'] as String,
-              args,
-              target,
-              skills,
+            agentTrace('tool.start', {
+              'toolCallId': call['id'],
+              'target': target,
+              'tool': call['name'],
+              'arguments': args,
+            });
+            final result = await runZoned(
+              () => execute(call['name'] as String, args, target, skills),
+              zoneValues: {agentTraceToolKey: call['id']},
             );
+            agentTrace('tool.result', {
+              'toolCallId': call['id'],
+              'target': target,
+              'tool': call['name'],
+              'result': result,
+            });
             output = jsonEncode(result);
             activity.result = toolResultText(activity.name, result);
             output = textTail(output, 48000, '[较早输出已截断]\n');
           } catch (e) {
+            agentTrace('tool.error', {
+              'toolCallId': call['id'],
+              'target': target,
+              'tool': call['name'],
+              'error': '$e',
+            });
             failed = true;
-            output = e is ApprovalDeclined ? e.message : '工具错误：$e';
+            if (e is ApiRequestFailure) activity.apiFailure = e;
+            if (e is RiskAssessmentFailure) {
+              activity.failed = true;
+              activity.result = e.message;
+              activeTool = null;
+              _record('任务已结束：$e。可以修改要求后继续输入。');
+              return;
+            }
+            output = e is ApprovalDeclined
+                ? e.message
+                : '工具错误：${e is ApiRequestFailure ? e.summary : e}';
           }
           activity.failed = failed;
           activity.result ??= visibleControls(textTail(output, 2000, '…'));
           activeTool = null;
           if (!_disposed) notifyListeners();
+          if (activity.apiFailure != null) {
+            _record('风险评估服务请求失败，本次命令未执行。请展开错误详情排查后重试。');
+            return;
+          }
           if (anthropic) {
             results.add({
               'type': 'tool_result',
@@ -421,7 +534,14 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
         _cancelled ? '任务已停止。已发送的命令可能仍在终端运行，可使用 Ctrl+C。' : '达到 40 轮上限，任务已停止。',
       );
     } catch (e) {
-      _record(_cancelled ? '任务已停止。' : '任务失败：$e');
+      agentTrace('agent.error', {'cancelled': _cancelled, 'error': '$e'});
+      _record(
+        _cancelled
+            ? '任务已停止。'
+            : e is ApiRequestFailure
+            ? e
+            : '任务失败：$e',
+      );
     } finally {
       workspace.removeListener(targetChanged);
       _client?.close(force: true);
@@ -429,6 +549,12 @@ ${skills.entries.map((s) => '${s.name}: ${s.description}').join('\n')}
       targetId = null;
       _model = null;
       running = false;
+      status = _cancelled ? '本轮已停止，可以继续输入' : '本轮已结束，可以继续输入';
+      agentTrace('agent.end', {
+        'target': target,
+        'cancelled': _cancelled,
+        'status': status,
+      });
       if (!_disposed) notifyListeners();
     }
   }

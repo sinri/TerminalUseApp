@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'api_request.dart';
 
 String expandHome(String path) => path.startsWith('~/')
     ? '${Platform.environment['HOME'] ?? '.'}/${path.substring(2)}'
@@ -106,22 +107,16 @@ class LlmProfile {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
-      final req = await client.getUrl(uri);
-      req.followRedirects = false;
-      if (auth == 'bearer') req.headers.set('Authorization', 'Bearer $apiKey');
-      if (auth == 'api-key') req.headers.set('x-api-key', apiKey);
-      if (protocol == 'anthropic') {
-        req.headers.set('anthropic-version', '2023-06-01');
-      }
-      final res = await req.close().timeout(const Duration(seconds: 15));
-      if (res.statusCode != 200) {
-        throw HttpException('加载模型失败 HTTP ${res.statusCode}');
-      }
-      final json = jsonDecode(
-        await utf8.decoder
-            .bind(res)
-            .join()
-            .timeout(const Duration(seconds: 15)),
+      final json = await apiJsonRequest(
+        client,
+        uri,
+        method: 'GET',
+        stage: '加载模型',
+        service: name,
+        protocol: protocol,
+        auth: auth,
+        apiKey: apiKey,
+        timeout: const Duration(seconds: 15),
       );
       final ids =
           (json['data'] as List)
