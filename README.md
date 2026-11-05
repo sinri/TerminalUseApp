@@ -108,3 +108,10 @@ FLUTTER_BIN=/path/to/flutter bash tools/run_macos_release.sh --dart-define=TERMI
 终端组件采用 [xterm](https://pub.dev/packages/xterm) 和 [flutter_pty](https://pub.dev/packages/flutter_pty)。
 
 图标回退字体：[Nerd Fonts Symbols Mono v3.4.0](https://github.com/ryanoasis/nerd-fonts/tree/v3.4.0/patched-fonts/NerdFontsSymbolsOnly)。字体原样打包，许可证见 `assets/fonts/NERD-FONTS-LICENSE.txt`。
+
+
+## 许可证
+
+本项目原创代码采用 [GNU GPL 第 3 版（仅限该版本，GPL-3.0-only）](LICENSE)。
+第三方依赖与字体保留各自的许可证及版权声明，不因本项目采用 GPL 而重新许可。
+依赖版本、许可证核对结果与分发注意事项见 [依赖许可证记录](docs/dependency-licenses.md)。
