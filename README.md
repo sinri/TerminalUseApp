@@ -49,7 +49,7 @@ Flutter 3.47.9 使用默认的合并 UI / 平台线程，已移除针对 Flutter
 
 左侧 `New` 新建 shell，点击 Tab 切换，双击或长按名称改名，关闭按钮终止对应会话。终端支持选中后复制、通过右键菜单粘贴，沿用 xterm 的平台键盘快捷键。Tab 的 `terminal-N` 是本次运行中的稳定 ID，关闭后不复用。
 
-在左下角「SSH 设置」中添加入口，随后从 New 旁的下拉菜单打开。支持用户名、端口、默认 `~/.ssh/id_rsa` 或自定义密钥路径，以及密码登录。密码在 SSH 终端交互输入，不保存；保留系统 OpenSSH 的主机指纹确认。自动设置 `ServerAliveInterval=30` 与 `ServerAliveCountMax=3`。SSH 可执行程序需已在系统 PATH 中。
+在左下角「SSH 设置」中添加入口，随后从 New 旁的下拉菜单打开。支持用户名、端口、默认 `~/.ssh/id_rsa` 或自定义密钥路径，以及密码登录。macOS 可在设置中填写密码并保存到系统钥匙串，连接时自动读取；留空则在终端手动输入，清空后保存可移除已存密码。其他平台仍在终端输入密码；保留系统 OpenSSH 的主机指纹确认。自动设置 `ServerAliveInterval=30` 与 `ServerAliveCountMax=3`。SSH 可执行程序需已在系统 PATH 中。
 
 macOS 关窗和 ⌘Q 共用退出流程：保持 Flutter 引擎存活，先停止内部 Agent，并行关闭桥接与各 PTY，再退出进程。正常清理完成后立即退出；Dart 暂停或失联时，原生端在约 2 秒后结束等待，避免无限挂住（此时不能保证所有清理已完成）。关闭 Tab 会向同一 PTY 下的进程发送挂断信号；`nohup` 或自行脱离会话的进程可以继续运行。
 
@@ -60,7 +60,7 @@ macOS 关窗和 ⌘Q 共用退出流程：保持 Flutter 引擎存活，先停�
 3. 可填写 Skills 根目录（支持 `~/`）。任务开始时递归发现 `SKILL.md`，将名称和描述提供给模型；模型通过 `skill_read` 按需读取全文。最多 200 个 Skill，单文件最多 128 KiB，不跟随目录符号链接，不允许读取根目录外的文件。Skill 附属脚本可由模型根据指引通过已授权的终端调用。
 4. 在右侧底部选择模型、填写任务并点击「发送」。当前会话保留上下文，右上角可新建会话。任务绑定开始时选中的终端，最多 40 轮；工具调用和回复显示在日志中。关闭目标 Tab 后任务停止。点击「停止」会停止后续工具调用；已提交的 shell 命令可用终端 Ctrl+C 中断。
 
-配置保存在 `~/.terminal-use/settings.json`（Windows 使用 `%APPDATA%/.terminal-use/settings.json`），Unix 目录权限 700、文件权限 600。API Key 保存在此本地文件中，输入界面隐藏显示。终端内容与 Skills 会发送给用户配置的模型 Endpoint；运行日志仅保存在本次内存中。当前不包含会话历史持久化和系统钥匙串集成。
+配置保存在 `~/.terminal-use/settings.json`（Windows 使用 `%APPDATA%/.terminal-use/settings.json`），Unix 目录权限 700、文件权限 600。API Key 保存在此本地文件中，输入界面隐藏显示。终端内容与 Skills 会发送给用户配置的模型 Endpoint；运行日志仅保存在本次内存中。SSH 密码在 macOS 存入系统钥匙串，不写入配置文件。当前不包含会话历史持久化。
 
 在输入框中键入 `@` 可按 Tab 名称或 ID 选择目标。发送前无需手写 ID。
 

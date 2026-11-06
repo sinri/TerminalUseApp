@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal Use
+Comment=Terminal and AI agent workspace
+Exec=terminal_use_app
+Icon=com.example.terminal_use_app
+Terminal=false
+Categories=Development;System;TerminalEmulator;
+StartupWMClass=com.example.terminal_use_app

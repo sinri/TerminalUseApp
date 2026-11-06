@@ -45,6 +45,7 @@ identification uses the inherited Flutter LICENSE where appropriate.
 | `flutter` | Flutter 3.47.9 | BSD-3-Clause |
 | `flutter_driver` | Flutter 3.47.9 | BSD-3-Clause |
 | `flutter_lints` | 6.0.0 | BSD-3-Clause |
+| `flutter_launcher_icons` (icon generation, development only) | 0.14.4 | MIT |
 | `flutter_pty` | 0.4.2 | MIT |
 | `flutter_test` | Flutter 3.47.9 | BSD-3-Clause |
 | `fuchsia_remote_debug_protocol` | Flutter 3.47.9 | BSD-3-Clause |

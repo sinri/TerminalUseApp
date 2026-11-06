@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'ssh_credentials.dart';
 import 'api_request.dart';
 import 'api_error_view.dart';
 
@@ -42,8 +44,18 @@ class _SettingsViewState extends State<SettingsView> {
     required bool isSsh,
   }) async {
     final labels = isSsh
-        ? ['名称', '主机', '用户名', '端口', '密钥路径']
+        ? ['名称', '主机', '用户名', '端口', '密钥路径', if (Platform.isMacOS) '保存的密码（可选）']
         : ['名称', 'API Endpoint', '可用模型（每行一个 ID）', 'API Key'];
+    var savedPassword = '';
+    if (isSsh && ssh != null && Platform.isMacOS) {
+      try {
+        savedPassword = await SshCredentials.read(ssh);
+      } catch (e) {
+        if (mounted) setState(() => error = '$e');
+        return;
+      }
+      if (!mounted) return;
+    }
     final values = isSsh
         ? [
             ssh?.name ?? '',
@@ -51,6 +63,7 @@ class _SettingsViewState extends State<SettingsView> {
             ssh?.user ?? '',
             '${ssh?.port ?? 22}',
             ssh?.key ?? '~/.ssh/id_rsa',
+            if (Platform.isMacOS) savedPassword,
           ]
         : [
             llm?.name ?? '',
@@ -62,6 +75,7 @@ class _SettingsViewState extends State<SettingsView> {
         .map((v) => TextEditingController(text: v))
         .toList();
     var password = ssh?.password ?? false;
+    var showSshPassword = false;
     var protocol = llm?.protocol ?? 'openai';
     var auth = llm?.auth ?? 'bearer';
     String? validation;
@@ -97,7 +111,7 @@ class _SettingsViewState extends State<SettingsView> {
             });
           }
 
-          void accept() {
+          Future<void> accept() async {
             if (loadingModels) return;
 
             try {
@@ -121,7 +135,23 @@ class _SettingsViewState extends State<SettingsView> {
                   throw const FormatException('请填写有效 Endpoint，并加载或填写模型列表');
                 }
               }
-              Navigator.pop(context, true);
+              if (isSsh && Platform.isMacOS) {
+                update(() => loadingModels = true);
+                try {
+                  await SshCredentials.save(
+                    SshProfile(
+                      name: controllers[0].text.trim(),
+                      host: controllers[1].text.trim(),
+                      user: controllers[2].text.trim(),
+                      port: int.parse(controllers[3].text),
+                    ),
+                    password ? controllers[5].text : '',
+                  );
+                } finally {
+                  if (context.mounted) update(() => loadingModels = false);
+                }
+              }
+              if (context.mounted) Navigator.pop(context, true);
             } catch (e) {
               reportValidation(e);
             }
@@ -155,9 +185,32 @@ class _SettingsViewState extends State<SettingsView> {
                             maxLines: !isSsh && i == 2 ? 5 : 1,
                             minLines: !isSsh && i == 2 ? 3 : 1,
                             enabled: !loadingModels,
-                            obscureText: !isSsh && i == 3,
+                            obscureText:
+                                (!isSsh && i == 3) ||
+                                (isSsh && i == 5 && !showSshPassword),
+                            enableSuggestions: !(isSsh && i == 5),
+                            autocorrect: !(isSsh && i == 5),
                             decoration: InputDecoration(
                               labelText: labels[i],
+                              suffixIcon: isSsh && i == 5
+                                  ? IconButton(
+                                      tooltip: showSshPassword
+                                          ? '隐藏密码'
+                                          : '显示密码',
+                                      onPressed: () => update(
+                                        () =>
+                                            showSshPassword = !showSshPassword,
+                                      ),
+                                      icon: Icon(
+                                        showSshPassword
+                                            ? Icons.visibility_off
+                                            : Icons.visibility,
+                                      ),
+                                    )
+                                  : null,
+                              helperText: isSsh && i == 5
+                                  ? '存入系统钥匙串；清空后保存可移除密码。'
+                                  : null,
                               labelStyle: Theme.of(context).textTheme.bodySmall,
                               floatingLabelStyle: Theme.of(context)
                                   .textTheme
@@ -189,7 +242,7 @@ class _SettingsViewState extends State<SettingsView> {
                       if (isSsh)
                         Row(
                           children: [
-                            const Expanded(child: Text('密码登录（在终端输入，不保存密码）')),
+                            const Expanded(child: Text('密码登录')),
                             CupertinoSwitch(
                               value: password,
                               onChanged: (v) => update(() => password = v),
@@ -500,7 +553,7 @@ class _SettingsViewState extends State<SettingsView> {
                   icon: CupertinoIcons.plus,
                   label: '添加 SSH 入口',
                 ),
-                description: '使用系统 OpenSSH 连接；密码仅在终端输入。',
+                description: '使用系统 OpenSSH 连接；macOS 支持将密码保存到系统钥匙串。',
                 children: [
                   if (widget.settings.ssh.isEmpty)
                     const Padding(

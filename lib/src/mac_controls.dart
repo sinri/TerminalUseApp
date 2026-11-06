@@ -130,6 +130,7 @@ class MacPopup<T> extends StatefulWidget {
     this.icon,
     this.toolbar = false,
     this.expanded = false,
+    this.showChevron = true,
   });
   final List<MacMenuEntry<T>> entries;
   final ValueChanged<T>? onSelected;
@@ -137,7 +138,7 @@ class MacPopup<T> extends StatefulWidget {
   final String label;
   final String? tooltip;
   final IconData? icon;
-  final bool toolbar, expanded;
+  final bool toolbar, expanded, showChevron;
 
   @override
   State<MacPopup<T>> createState() => _MacPopupState<T>();
@@ -195,6 +196,13 @@ class _MacPopupState<T> extends State<MacPopup<T>> {
               textStyle: WidgetStatePropertyAll(
                 Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 12),
               ),
+              foregroundColor: toolbar
+                  ? WidgetStateProperty.resolveWith(
+                      (states) => states.contains(WidgetState.disabled)
+                          ? c.onSurface.withValues(alpha: .38)
+                          : c.onSurface,
+                    )
+                  : null,
               backgroundColor: WidgetStatePropertyAll(
                 toolbar ? Colors.transparent : c.surfaceContainerLowest,
               ),
@@ -213,14 +221,17 @@ class _MacPopupState<T> extends State<MacPopup<T>> {
               ),
               visualDensity: VisualDensity.standard,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              alignment: Alignment.centerLeft,
+              alignment: label.isEmpty && !widget.showChevron
+                  ? Alignment.center
+                  : Alignment.centerLeft,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (icon != null) ...[
                   Icon(icon, size: 14),
-                  const SizedBox(width: 6),
+                  if (label.isNotEmpty || widget.showChevron)
+                    const SizedBox(width: 6),
                 ],
                 if (label.isNotEmpty) ...[
                   Flexible(
@@ -232,7 +243,8 @@ class _MacPopupState<T> extends State<MacPopup<T>> {
                   ),
                   const SizedBox(width: 8),
                 ],
-                const Icon(CupertinoIcons.chevron_down, size: 10),
+                if (widget.showChevron)
+                  const Icon(CupertinoIcons.chevron_down, size: 10),
               ],
             ),
           ),

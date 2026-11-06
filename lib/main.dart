@@ -9,6 +9,7 @@ import 'src/mac_controls.dart';
 import 'src/terminal_session.dart';
 import 'src/terminal_workspace.dart';
 import 'src/settings.dart';
+import 'src/ssh_credentials.dart';
 import 'src/settings_view.dart';
 import 'src/internal_agent.dart';
 import 'src/internal_agent_view.dart';
@@ -67,6 +68,8 @@ class _WorkspaceState extends State<Workspace> {
   final terminalFocus = <TerminalSession, FocusNode>{};
   final agentInputFocus = FocusNode(debugLabel: 'Agent input');
   bool settingsOpen = false;
+  bool agentCollapsed = false;
+  bool tabsCollapsed = false;
 
   Future<void> _workspaceAction(String action) async {
     if (action == 'closeTab' && settingsOpen) {
@@ -91,10 +94,23 @@ class _WorkspaceState extends State<Workspace> {
       case 'previousTab':
         _cycleTerminal(-1);
       case 'focusAgent':
-        agentInputFocus.requestFocus();
+        if (agentCollapsed) {
+          setState(() => agentCollapsed = false);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) agentInputFocus.requestFocus();
+          });
+        } else {
+          agentInputFocus.requestFocus();
+        }
       case 'focusTerminal':
         _focusTerminal();
     }
+  }
+
+  void _collapseAgent() {
+    agentInputFocus.unfocus();
+    setState(() => agentCollapsed = true);
+    _focusTerminal();
   }
 
   void _focusTerminal() {
@@ -414,6 +430,7 @@ class _WorkspaceState extends State<Workspace> {
       body: SafeArea(
         child: Column(
           children: [
+            _workspaceToolbar(),
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.orange)),
             Expanded(
@@ -425,106 +442,61 @@ class _WorkspaceState extends State<Workspace> {
                   );
                   final maxSidebar =
                       bounds.maxWidth -
-                      width -
+                      (agentCollapsed ? 0 : width) -
                       200; // Space for the terminal and both handles.
                   final sidebar = tabWidth.clamp(120.0, maxSidebar);
                   return Row(
                     children: [
-                      SizedBox(
-                        width: sidebar,
-                        child: Column(
-                          children: [
-                            Container(
-                              height: 36,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              child: Row(
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      '终端',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                      Offstage(
+                        offstage: tabsCollapsed,
+                        child: ExcludeFocus(
+                          excluding: tabsCollapsed,
+                          child: SizedBox(
+                            key: const Key('terminal-sidebar'),
+                            width: sidebar,
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: ListView(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 4,
                                     ),
-                                  ),
-                                  MacButton(
-                                    onPressed: _newTerminal,
-                                    icon: CupertinoIcons.plus,
-                                    toolbar: true,
-                                    tooltip: '新建终端',
-                                  ),
-                                  MacPopup<Object>(
-                                    label: '',
-                                    tooltip: '打开 SSH',
-                                    toolbar: true,
-                                    entries: [
-                                      for (final p in settings.ssh)
-                                        MacMenuEntry<Object>(
-                                          p,
-                                          p.name,
-                                          icon: CupertinoIcons
-                                              .antenna_radiowaves_left_right,
+                                    children: [
+                                      for (final tab in workspace.tabs)
+                                        MacSidebarItem(
+                                          key: ValueKey(tab.id),
+                                          label: tab.name,
+                                          selected: tab == workspace.selected,
+                                          running: tab.session.running,
+                                          onSelect: () =>
+                                              _selectTerminal(tab.id),
+                                          onClose: () => _closeTerminal(tab),
+                                          onRename: () => _rename(tab),
+                                          onContextMenu: (p) =>
+                                              _tabMenu(tab, p),
                                         ),
-                                      const MacMenuEntry<Object>(
-                                        'settings',
-                                        '管理 SSH 入口',
-                                      ),
                                     ],
-                                    onSelected: (v) => v is SshProfile
-                                        ? _newTerminal(v)
-                                        : _openSettings(ssh: true),
                                   ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              child: ListView(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 4,
                                 ),
-                                children: [
-                                  for (final tab in workspace.tabs)
-                                    MacSidebarItem(
-                                      key: ValueKey(tab.id),
-                                      label: tab.name,
-                                      selected: tab == workspace.selected,
-                                      running: tab.session.running,
-                                      onSelect: () => _selectTerminal(tab.id),
-                                      onClose: () => _closeTerminal(tab),
-                                      onRename: () => _rename(tab),
-                                      onContextMenu: (p) => _tabMenu(tab, p),
-                                    ),
-                                ],
-                              ),
+                              ],
                             ),
-                            Padding(
-                              padding: const EdgeInsets.all(6),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: MacButton(
-                                  onPressed: () => _openSettings(ssh: true),
-                                  icon: CupertinoIcons.gear,
-                                  label: 'SSH 设置',
-                                  toolbar: true,
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
-                      MacSplitHandle(
-                        key: const Key('tabs-divider'),
-                        axis: Axis.horizontal,
-                        label: '终端侧栏宽度',
-                        onReset: () => setState(() => tabWidth = 180),
-                        onDelta: (dx) => setState(
-                          () => tabWidth = (sidebar + dx).clamp(
-                            120.0,
-                            maxSidebar,
+                      Visibility(
+                        visible: !tabsCollapsed,
+                        maintainState: true,
+                        child: MacSplitHandle(
+                          key: const Key('tabs-divider'),
+                          axis: Axis.horizontal,
+                          label: '终端侧栏宽度',
+                          onReset: () => setState(() => tabWidth = 180),
+                          onDelta: (dx) => setState(
+                            () => tabWidth = (sidebar + dx).clamp(
+                              120.0,
+                              maxSidebar,
+                            ),
                           ),
                         ),
                       ),
@@ -569,7 +541,7 @@ class _WorkspaceState extends State<Workspace> {
                                       MacButton(
                                         onPressed: _newTerminal,
                                         label: '新建终端',
-                                        icon: CupertinoIcons.plus,
+                                        icon: Icons.fiber_new,
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
@@ -589,31 +561,45 @@ class _WorkspaceState extends State<Workspace> {
                               : _terminal(workspace.selected!.session),
                         ),
                       ),
-                      MacSplitHandle(
-                        key: const Key('panel-divider'),
-                        axis: Axis.horizontal,
-                        label: 'Agent 面板宽度',
-                        onReset: () => setState(() => agentFraction = .31),
-                        onDelta: (dx) => setState(
-                          () => agentFraction =
-                              ((width - dx).clamp(
-                                248.0,
-                                bounds.maxWidth - sidebar - 200,
-                              )) /
-                              bounds.maxWidth,
+                      Visibility(
+                        visible: !agentCollapsed,
+                        maintainState: true,
+                        child: MacSplitHandle(
+                          key: const Key('panel-divider'),
+                          axis: Axis.horizontal,
+                          label: 'Agent 面板宽度',
+                          onReset: () => setState(() => agentFraction = .31),
+                          onDelta: (dx) => setState(
+                            () => agentFraction =
+                                ((width - dx).clamp(
+                                  248.0,
+                                  bounds.maxWidth -
+                                      (tabsCollapsed ? 0 : sidebar) -
+                                      200,
+                                )) /
+                                bounds.maxWidth,
+                          ),
                         ),
                       ),
-                      SizedBox(
-                        width: width,
-                        child: InternalAgentView(
-                          agent: internal,
-                          inputFocus: agentInputFocus,
-                          task: taskDraft,
-                          selected: selectedModel,
-                          select: (m) => setState(() => selectedModel = m),
-                          configure: () => _openSettings(),
-                          settings: settings,
-                          workspace: workspace,
+                      // Keep the complete panel mounted at its expanded width.
+                      // Collapsing must not dispose local UI or conversation state.
+                      Offstage(
+                        offstage: agentCollapsed,
+                        child: ExcludeFocus(
+                          excluding: agentCollapsed,
+                          child: SizedBox(
+                            width: width,
+                            child: InternalAgentView(
+                              agent: internal,
+                              inputFocus: agentInputFocus,
+                              task: taskDraft,
+                              selected: selectedModel,
+                              select: (m) => setState(() => selectedModel = m),
+                              configure: () => _openSettings(),
+                              settings: settings,
+                              workspace: workspace,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -646,7 +632,6 @@ class _WorkspaceState extends State<Workspace> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Text('${workspace.tabs.length} 个终端'),
                   ],
                 ),
               ),
@@ -655,6 +640,206 @@ class _WorkspaceState extends State<Workspace> {
         ),
       ),
     ),
+  );
+
+  Widget _workspaceToolbar() => LayoutBuilder(
+    builder: (context, bounds) {
+      final colors = Theme.of(context).colorScheme;
+      final agentWidth = (bounds.maxWidth * agentFraction).clamp(
+        248.0,
+        bounds.maxWidth - 320,
+      );
+      return Container(
+        key: const Key('workspace-toolbar'),
+        height: 36,
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: tabsCollapsed ? 42 : 220,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    Semantics(
+                      expanded: !tabsCollapsed,
+                      child: MacButton(
+                        key: const Key('toggle-tabs'),
+                        tooltip: tabsCollapsed ? '展开终端列表' : '收起终端列表',
+                        icon: CupertinoIcons.sidebar_left,
+                        toolbar: true,
+                        onPressed: () {
+                          setState(() => tabsCollapsed = !tabsCollapsed);
+                          if (tabsCollapsed) _focusTerminal();
+                        },
+                      ),
+                    ),
+                    if (!tabsCollapsed) ...[
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${workspace.tabs.length} 个终端',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      ),
+                      MacButton(
+                        tooltip: '终端设置',
+                        icon: CupertinoIcons.gear,
+                        toolbar: true,
+                        onPressed: () => _openSettings(ssh: true),
+                      ),
+                      MacButton(
+                        tooltip: '新建终端',
+                        icon: Icons.fiber_new,
+                        toolbar: true,
+                        onPressed: _newTerminal,
+                      ),
+                      MacPopup<SshProfile>(
+                        label: '',
+                        tooltip: '打开 SSH',
+                        icon: Icons.view_list,
+                        showChevron: false,
+                        toolbar: true,
+                        entries: [
+                          for (final p in settings.ssh)
+                            MacMenuEntry<SshProfile>(
+                              p,
+                              p.name,
+                              icon: Icons.view_list,
+                            ),
+                        ],
+                        onSelected: _newTerminal,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            VerticalDivider(
+              key: const Key('toolbar-left-divider'),
+              width: 1,
+              thickness: 1,
+              indent: 9,
+              endIndent: 9,
+              color: colors.outlineVariant.withValues(alpha: .8),
+            ),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: MacButton(
+                    key: const Key('rename-active-terminal'),
+                    tooltip: workspace.selected == null ? '未选择终端' : '重命名当前终端',
+                    toolbar: true,
+                    onPressed: workspace.selected == null
+                        ? null
+                        : () => _rename(workspace.selected!),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            workspace.selected?.name ?? '未选择终端',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (workspace.selected != null) ...[
+                          const SizedBox(width: 6),
+                          const Icon(CupertinoIcons.pencil, size: 12),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            VerticalDivider(
+              key: const Key('toolbar-right-divider'),
+              width: 1,
+              thickness: 1,
+              indent: 9,
+              endIndent: 9,
+              color: colors.outlineVariant.withValues(alpha: .8),
+            ),
+            SizedBox(
+              width: agentCollapsed ? 42 : agentWidth,
+              child: ListenableBuilder(
+                listenable: internal,
+                builder: (context, _) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      if (!agentCollapsed) ...[
+                        const Icon(CupertinoIcons.sparkles, size: 14),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Tooltip(
+                            message: internal.conversationTitle ?? 'Agent',
+                            child: Text(
+                              internal.conversationTitle ?? 'Agent',
+                              key: const Key('agent-conversation-title'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (internal.running)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 6),
+                            child: Text('运行中', style: TextStyle(fontSize: 11)),
+                          ),
+                        MacButton(
+                          tooltip: '新建 Agent 会话',
+                          icon: CupertinoIcons.square_pencil,
+                          toolbar: true,
+                          onPressed: internal.running
+                              ? null
+                              : () {
+                                  internal.newConversation();
+                                  taskDraft.clear();
+                                },
+                        ),
+                        MacButton(
+                          tooltip: 'Agent 设置',
+                          icon: CupertinoIcons.gear,
+                          toolbar: true,
+                          onPressed: () => _openSettings(),
+                        ),
+                      ],
+                      Semantics(
+                        expanded: !agentCollapsed,
+                        child: MacButton(
+                          key: const Key('toggle-agent'),
+                          tooltip: agentCollapsed ? '展开 Agent' : '收起 Agent',
+                          icon: CupertinoIcons.sidebar_right,
+                          toolbar: true,
+                          onPressed: () {
+                            if (agentCollapsed) {
+                              setState(() => agentCollapsed = false);
+                            } else {
+                              _collapseAgent();
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
   );
 
   Future<void> _openSettings({bool ssh = false}) async {
@@ -680,10 +865,15 @@ class _WorkspaceState extends State<Workspace> {
     if (mounted) setState(() {});
   }
 
-  void _newTerminal([SshProfile? ssh]) {
+  Future<void> _newTerminal([SshProfile? ssh]) async {
     if (settingsOpen) return;
     try {
+      final environment = ssh == null
+          ? <String, String>{}
+          : await SshCredentials.environment(ssh);
+      if (!mounted) return;
       final tab = workspace.add(
+        environment: environment,
         name: ssh?.name,
         executable: ssh == null ? null : 'ssh',
         arguments: ssh?.arguments ?? const [],

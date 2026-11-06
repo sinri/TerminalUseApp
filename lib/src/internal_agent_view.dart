@@ -244,54 +244,6 @@ class _InternalAgentViewState extends State<InternalAgentView> {
           child: LayoutBuilder(
             builder: (context, panel) => Column(
               children: [
-                Container(
-                  height: 36,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
-                      ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(CupertinoIcons.sparkles, size: 14),
-                      const SizedBox(width: 6),
-                      const Expanded(
-                        child: Text(
-                          'Agent',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      if (a.running)
-                        const Padding(
-                          padding: EdgeInsets.only(right: 6),
-                          child: Text('运行中', style: TextStyle(fontSize: 11)),
-                        ),
-                      MacButton(
-                        tooltip: 'Agent 设置',
-                        onPressed: widget.configure,
-                        icon: CupertinoIcons.gear,
-                        toolbar: true,
-                      ),
-                      MacButton(
-                        tooltip: '新建 Agent 会话',
-                        onPressed: a.running
-                            ? null
-                            : () {
-                                a.newConversation();
-                                task.clear();
-                              },
-                        icon: CupertinoIcons.square_pencil,
-                        toolbar: true,
-                      ),
-                    ],
-                  ),
-                ),
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, body) {

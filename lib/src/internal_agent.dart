@@ -121,6 +121,26 @@ class InternalAgent extends ChangeNotifier {
   }
 
   final log = <Object>[];
+
+  /// Keep the conversation name stable as follow-up tasks are added.
+  String? get conversationTitle {
+    for (final entry in log) {
+      if (entry is! String || !entry.startsWith('任务 → ')) continue;
+      final newline = entry.indexOf('\n');
+      if (newline < 0) continue;
+      final title = entry
+          .substring(newline + 1)
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (title.isEmpty) continue;
+      final characters = title.runes;
+      return characters.length > 32
+          ? '${String.fromCharCodes(characters.take(32))}…'
+          : title;
+    }
+    return null;
+  }
+
   String? targetId;
   bool running = false;
   String status = '就绪，可以输入任务';

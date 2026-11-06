@@ -23,10 +23,15 @@ class TerminalWorkspace extends ChangeNotifier {
     String? name,
     String? executable,
     List<String> arguments = const [],
+    Map<String, String> environment = const {},
   }) {
     final session = TerminalSession();
     try {
-      session.start(executable: executable, arguments: arguments);
+      session.start(
+        executable: executable,
+        arguments: arguments,
+        environment: environment,
+      );
     } catch (_) {
       session.dispose();
       rethrow;
