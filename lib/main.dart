@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,8 @@ import 'src/settings.dart';
 import 'src/ssh_credentials.dart';
 import 'src/settings_view.dart';
 import 'src/internal_agent.dart';
+import 'src/agent_conversations.dart';
+import 'src/agent_history_view.dart';
 import 'src/internal_agent_view.dart';
 
 // Keep the platform's text metrics and use the bundled mono icons only for
@@ -35,7 +38,8 @@ void main() {
 }
 
 class TerminalUseApp extends StatelessWidget {
-  const TerminalUseApp({super.key});
+  const TerminalUseApp({super.key, this.historyFile});
+  final File? historyFile;
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -43,12 +47,13 @@ class TerminalUseApp extends StatelessWidget {
     theme: desktopTheme(Brightness.light),
     darkTheme: desktopTheme(Brightness.dark),
     themeMode: ThemeMode.system,
-    home: const Workspace(),
+    home: Workspace(historyFile: historyFile),
   );
 }
 
 class Workspace extends StatefulWidget {
-  const Workspace({super.key});
+  const Workspace({super.key, this.historyFile});
+  final File? historyFile;
   @override
   State<Workspace> createState() => _WorkspaceState();
 }
@@ -57,10 +62,13 @@ class _WorkspaceState extends State<Workspace> {
   static const lifecycle = MethodChannel('terminal_use/lifecycle');
   final workspace = TerminalWorkspace();
   final settings = AppSettings();
-  late final InternalAgent internal = InternalAgent(
+  late final conversations = AgentConversations(
     workspace,
-    settings: settings,
+    settings,
+    file: widget.historyFile,
   );
+  InternalAgent get internal => conversations.active.agent;
+  String? _visibleConversationId;
   String? legacyId;
   final taskDraft = TextEditingController();
   ModelChoice? selectedModel;
@@ -157,12 +165,24 @@ class _WorkspaceState extends State<Workspace> {
       ),
       items: const [
         PopupMenuItem(height: 28, value: 'rename', child: Text('重命名…')),
+        PopupMenuItem(
+          height: 28,
+          value: 'bind-agent',
+          child: Text('绑定 Agent 会话…'),
+        ),
+        PopupMenuItem(
+          height: 28,
+          value: 'unbind-agent',
+          child: Text('解绑 Agent 会话'),
+        ),
         PopupMenuItem(height: 28, value: 'close', child: Text('关闭终端')),
       ],
     );
     if (!mounted || !workspace.tabs.contains(tab)) return;
     if (value == 'rename') await _rename(tab);
     if (value == 'close') _closeTerminal(tab);
+    if (value == 'bind-agent') await _showHistory(tab: tab);
+    if (value == 'unbind-agent') conversations.bind(tab, null);
   }
 
   String get defaultTerminalId {
@@ -196,6 +216,9 @@ class _WorkspaceState extends State<Workspace> {
         await _workspaceAction(call.method);
       }
     });
+    conversations.addListener(_conversationChanged);
+    _visibleConversationId = conversations.active.id;
+    taskDraft.addListener(_draftChanged);
     workspace.addListener(_refresh);
     WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
       if (mounted) _startupMark('first frame rasterized');
@@ -221,6 +244,7 @@ class _WorkspaceState extends State<Workspace> {
         error = '配置读取失败，原文件已保留：$e';
       }
       _startupMark('settings loaded');
+      await conversations.load();
       if (!mounted || shutdown != null) return;
       final api = AgentServer(
         read: () => workspace.require(defaultTerminalId).session.snapshot(),
@@ -266,6 +290,23 @@ class _WorkspaceState extends State<Workspace> {
     workspace.require(id).session.write(text);
   }
 
+  void _draftChanged() => conversations.updateDraft(taskDraft.text);
+
+  void _conversationChanged() {
+    if (!mounted) return;
+    if (_visibleConversationId != conversations.active.id) {
+      _visibleConversationId = conversations.active.id;
+      taskDraft.text = conversations.active.draft;
+    }
+    setState(() {});
+  }
+
+  Future<void> _showHistory({TerminalTab? tab}) => showDialog<void>(
+    context: context,
+    builder: (context) =>
+        AgentHistoryDialog(conversations: conversations, tab: tab),
+  );
+
   void _refresh() {
     if (mounted) setState(() {});
   }
@@ -273,10 +314,11 @@ class _WorkspaceState extends State<Workspace> {
   Future<void>? shutdown;
   Future<void> _shutdown() => shutdown ??= _closeResources();
   Future<void> _closeResources() async {
-    internal.approvals.cancelAll();
-    internal.stop();
+    conversations.clearBindings();
+    conversations.stopAll();
     final watch = Stopwatch()..start();
     await Future.wait<void>([
+      conversations.flush(),
       if (server != null) server!.close(),
       for (final tab in workspace.tabs) tab.session.close(),
     ]);
@@ -290,9 +332,11 @@ class _WorkspaceState extends State<Workspace> {
   @override
   void dispose() {
     lifecycle.setMethodCallHandler(null);
-    _shutdown();
-    internal.dispose();
+    conversations.removeListener(_conversationChanged);
+    taskDraft.removeListener(_draftChanged);
     workspace.removeListener(_refresh);
+    _shutdown();
+    conversations.dispose();
     workspace.dispose();
     for (final controller in terminalControllers.values) {
       controller.dispose();
@@ -348,51 +392,55 @@ class _WorkspaceState extends State<Workspace> {
 
   Widget _terminal(TerminalSession session) => Padding(
     padding: const EdgeInsets.all(8),
-    child: TerminalView(
-      session.terminal,
-      key: ValueKey(session),
-      controller: terminalControllers.putIfAbsent(
-        session,
-        TerminalController.new,
+    // xterm paints partially visible rows while scrolling. Clip its viewport
+    // so glyphs and row backgrounds cannot cover the workspace toolbar.
+    child: ClipRect(
+      child: TerminalView(
+        session.terminal,
+        key: ValueKey(session),
+        controller: terminalControllers.putIfAbsent(
+          session,
+          TerminalController.new,
+        ),
+        onSecondaryTapDown: (details, offset) =>
+            _terminalMenu(session, details.globalPosition),
+        autofocus: true,
+        focusNode: terminalFocus.putIfAbsent(
+          session,
+          () => FocusNode(debugLabel: 'Terminal'),
+        ),
+        textStyle: terminalTextStyle,
+        backgroundOpacity: 0,
+        hardwareKeyboardOnly: false,
+        onKeyEvent: (_, event) {
+          if (event is! KeyDownEvent ||
+              !HardwareKeyboard.instance.isMetaPressed) {
+            return KeyEventResult.ignored;
+          }
+          final action = switch (event.logicalKey) {
+            LogicalKeyboardKey.keyT => 'newTerminal',
+            LogicalKeyboardKey.keyW => 'closeTab',
+            LogicalKeyboardKey.comma => 'settings',
+            LogicalKeyboardKey.arrowLeft
+                when HardwareKeyboard.instance.isAltPressed =>
+              'previousTab',
+            LogicalKeyboardKey.arrowRight
+                when HardwareKeyboard.instance.isAltPressed =>
+              'nextTab',
+            LogicalKeyboardKey.keyA
+                when HardwareKeyboard.instance.isShiftPressed =>
+              'focusAgent',
+            _ => null,
+          };
+          if (action == null) return KeyEventResult.ignored;
+          // Never dispose a focused terminal from inside its key event callback.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _workspaceAction(action);
+          });
+          WidgetsBinding.instance.scheduleFrame();
+          return KeyEventResult.handled;
+        },
       ),
-      onSecondaryTapDown: (details, offset) =>
-          _terminalMenu(session, details.globalPosition),
-      autofocus: true,
-      focusNode: terminalFocus.putIfAbsent(
-        session,
-        () => FocusNode(debugLabel: 'Terminal'),
-      ),
-      textStyle: terminalTextStyle,
-      backgroundOpacity: 0,
-      hardwareKeyboardOnly: false,
-      onKeyEvent: (_, event) {
-        if (event is! KeyDownEvent ||
-            !HardwareKeyboard.instance.isMetaPressed) {
-          return KeyEventResult.ignored;
-        }
-        final action = switch (event.logicalKey) {
-          LogicalKeyboardKey.keyT => 'newTerminal',
-          LogicalKeyboardKey.keyW => 'closeTab',
-          LogicalKeyboardKey.comma => 'settings',
-          LogicalKeyboardKey.arrowLeft
-              when HardwareKeyboard.instance.isAltPressed =>
-            'previousTab',
-          LogicalKeyboardKey.arrowRight
-              when HardwareKeyboard.instance.isAltPressed =>
-            'nextTab',
-          LogicalKeyboardKey.keyA
-              when HardwareKeyboard.instance.isShiftPressed =>
-            'focusAgent',
-          _ => null,
-        };
-        if (action == null) return KeyEventResult.ignored;
-        // Never dispose a focused terminal from inside its key event callback.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _workspaceAction(action);
-        });
-        WidgetsBinding.instance.scheduleFrame();
-        return KeyEventResult.handled;
-      },
     ),
   );
   double tabWidth = 180;
@@ -591,6 +639,7 @@ class _WorkspaceState extends State<Workspace> {
                             width: width,
                             child: InternalAgentView(
                               agent: internal,
+                              conversations: conversations,
                               inputFocus: agentInputFocus,
                               task: taskDraft,
                               selected: selectedModel,
@@ -769,7 +818,7 @@ class _WorkspaceState extends State<Workspace> {
             SizedBox(
               width: agentCollapsed ? 42 : agentWidth,
               child: ListenableBuilder(
-                listenable: internal,
+                listenable: conversations,
                 builder: (context, _) => Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
@@ -779,9 +828,11 @@ class _WorkspaceState extends State<Workspace> {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Tooltip(
-                            message: internal.conversationTitle ?? 'Agent',
+                            message: conversations.active.title,
                             child: Text(
-                              internal.conversationTitle ?? 'Agent',
+                              conversations.active.name ??
+                                  internal.conversationTitle ??
+                                  'Agent',
                               key: const Key('agent-conversation-title'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -801,12 +852,16 @@ class _WorkspaceState extends State<Workspace> {
                           tooltip: '新建 Agent 会话',
                           icon: CupertinoIcons.square_pencil,
                           toolbar: true,
-                          onPressed: internal.running
-                              ? null
-                              : () {
-                                  internal.newConversation();
-                                  taskDraft.clear();
-                                },
+                          onPressed: conversations.create,
+                        ),
+                        MacButton(
+                          key: const Key('agent-history'),
+                          tooltip: conversations.storageError ?? 'Agent 会话历史',
+                          icon: conversations.storageError == null
+                              ? CupertinoIcons.clock
+                              : CupertinoIcons.exclamationmark_triangle,
+                          toolbar: true,
+                          onPressed: () => _showHistory(),
                         ),
                         MacButton(
                           tooltip: 'Agent 设置',

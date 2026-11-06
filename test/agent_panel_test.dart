@@ -1,18 +1,31 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:terminal_use_app/main.dart';
 import 'package:terminal_use_app/src/internal_agent_view.dart';
+import 'package:terminal_use_app/src/mac_controls.dart';
 import 'package:terminal_use_app/src/terminal_session.dart';
 import 'package:terminal_use_app/src/terminal_workspace.dart';
 
 void main() {
+  late Directory historyDirectory;
+  setUp(() async {
+    historyDirectory = await Directory.systemTemp.createTemp(
+      'agent-panel-test-',
+    );
+  });
+
   testWidgets(
     'toolbar renames the active terminal and fits the minimum window',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(720, 640));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(const TerminalUseApp());
+      await tester.pumpWidget(
+        TerminalUseApp(
+          historyFile: File('${historyDirectory.path}/history.json'),
+        ),
+      );
       final view = tester.widget<InternalAgentView>(
         find.byType(InternalAgentView),
       );
@@ -82,7 +95,11 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(const TerminalUseApp());
+    await tester.pumpWidget(
+      TerminalUseApp(
+        historyFile: File('${historyDirectory.path}/history.json'),
+      ),
+    );
     final panel = find.byType(InternalAgentView);
     final state = tester.state(panel);
     final view = tester.widget<InternalAgentView>(panel);
@@ -152,12 +169,119 @@ void main() {
 
     await tester.tap(find.byTooltip('新建 Agent 会话'));
     await tester.pump();
-    expect(view.agent.conversationTitle, isNull);
+    expect(view.agent.conversationTitle, '检查服务日志并排查启动失败');
+    expect(
+      tester.widget<InternalAgentView>(panel).agent.conversationTitle,
+      isNull,
+    );
     expect(find.text('Agent'), findsOneWidget);
 
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
+  });
+  testWidgets('history switches drafts and binds or unbinds the selected tab', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(720, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      TerminalUseApp(
+        historyFile: File('${historyDirectory.path}/binding.json'),
+      ),
+    );
+    var panel = tester.widget<InternalAgentView>(
+      find.byType(InternalAgentView),
+    );
+    final firstAgent = panel.agent;
+    firstAgent.log.add('任务 → first\n第一个会话');
+    panel.task.text = '第一份草稿';
+    final one = TerminalTab('first', '开发终端', TerminalSession());
+    final two = TerminalTab('second', '其他终端', TerminalSession());
+    final bindingButton = tester.widget<MacButton>(
+      find.byKey(const Key('agent-tab-binding')),
+    );
+    expect(bindingButton.onPressed, isNull);
+    final topToolbar = find.byKey(const Key('workspace-toolbar'));
+    expect(
+      find.descendant(
+        of: topToolbar,
+        matching: find.byKey(const Key('agent-tab-binding')),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: topToolbar,
+        matching: find.byKey(const Key('agent-history')),
+      ),
+      findsOneWidget,
+    );
+    final middleToolbar = find.byKey(const Key('agent-session-toolbar'));
+    expect(
+      tester.getTopLeft(middleToolbar).dy,
+      greaterThan(
+        tester.getBottomLeft(find.byKey(const Key('agent-context'))).dy - 1,
+      ),
+    );
+    expect(
+      tester.getBottomLeft(middleToolbar).dy,
+      lessThanOrEqualTo(
+        tester.getTopLeft(find.byKey(const Key('agent-input-divider'))).dy,
+      ),
+    );
+    panel.workspace.tabs.addAll([one, two]);
+    panel.workspace.select(one.id);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('agent-tab-binding')));
+    await tester.pumpAndSettle();
+    expect(one.agentConversationId, isNotNull);
+    await tester.tap(find.byKey(const Key('agent-history')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('已绑定：开发终端'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('新建 Agent 会话'));
+    await tester.pump();
+    panel = tester.widget<InternalAgentView>(find.byType(InternalAgentView));
+    expect(panel.agent, isNot(same(firstAgent)));
+    expect(panel.task.text, isEmpty);
+    panel.task.text = '第二份草稿';
+    panel.workspace.select(two.id);
+    panel.workspace.select(one.id);
+    await tester.pump();
+    panel = tester.widget<InternalAgentView>(find.byType(InternalAgentView));
+    expect(panel.agent, same(firstAgent));
+    expect(panel.task.text, '第一份草稿');
+    await tester.tap(find.byKey(const Key('agent-tab-unbinding')));
+    await tester.pumpAndSettle();
+    expect(one.agentConversationId, isNull);
+    await tester.tap(find.byKey(const Key('agent-history')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新会话'));
+    await tester.pumpAndSettle();
+    panel = tester.widget<InternalAgentView>(find.byType(InternalAgentView));
+    expect(panel.task.text, '第二份草稿');
+    panel.workspace.select(two.id);
+    panel.workspace.select(one.id);
+    await tester.pump();
+    expect(
+      tester.widget<InternalAgentView>(find.byType(InternalAgentView)).agent,
+      same(panel.agent),
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const Key('agent-tab-binding')));
+    await tester.pump();
+    expect(one.agentConversationId, isNotNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(one.agentConversationId, isNull);
   });
 }

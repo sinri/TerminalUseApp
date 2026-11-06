@@ -5,10 +5,12 @@ class TerminalTab {
   TerminalTab(this.id, this.name, this.session);
   final String id;
   String name;
+  String? agentConversationId;
   final TerminalSession session;
   Map<String, dynamic> snapshot() => {
     'id': id,
     'name': name,
+    'agentConversationId': agentConversationId,
     ...session.snapshot(),
   };
 }
@@ -66,6 +68,7 @@ class TerminalWorkspace extends ChangeNotifier {
 
   void close(String id) {
     final tab = require(id);
+    tab.agentConversationId = null;
     tabs.remove(tab);
     tab.session.removeListener(notifyListeners);
     tab.session.dispose();
@@ -76,6 +79,7 @@ class TerminalWorkspace extends ChangeNotifier {
   @override
   void dispose() {
     for (final tab in tabs) {
+      tab.agentConversationId = null;
       tab.session.removeListener(notifyListeners);
       tab.session.dispose();
     }

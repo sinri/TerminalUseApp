@@ -122,6 +122,142 @@ class InternalAgent extends ChangeNotifier {
 
   final log = <Object>[];
 
+  /// Only durable data is restored. Pending approvals and running tools never resume.
+  Map<String, dynamic> exportConversation() => {
+    'history': _history,
+    'log': log.map((entry) {
+      if (entry is AgentText) {
+        return {
+          'type': 'reply',
+          'text': entry.text,
+          'complete': entry.complete,
+        };
+      }
+      if (entry is ToolActivity) {
+        return {
+          'type': 'tool',
+          'name': entry.name,
+          'target': entry.target,
+          'arguments': entry.arguments,
+          'result': entry.result,
+          'failed': entry.failed,
+          'apiFailure': entry.apiFailure == null
+              ? null
+              : {
+                  'summary': entry.apiFailure!.summary,
+                  'details': entry.apiFailure!.details,
+                },
+          'approval': entry.approval == null
+              ? null
+              : _exportApproval(entry.approval!),
+        };
+      }
+      if (entry is ApiRequestFailure) {
+        return {
+          'type': 'error',
+          'summary': entry.summary,
+          'details': entry.details,
+        };
+      }
+      if (entry is ApprovedOperation) {
+        return {'type': 'approval', ..._exportApproval(entry)};
+      }
+      return {'type': 'text', 'text': '$entry'};
+    }).toList(),
+  };
+
+  static Map<String, dynamic> _exportApproval(ApprovedOperation operation) => {
+    'automatic': operation.automatic,
+    'review': {
+      'target': operation.review.target,
+      'tool': operation.review.tool,
+      'text': operation.review.text,
+      'level': operation.review.level,
+      'reason': operation.review.reason,
+      'explanation': operation.review.explanation,
+      'syntax': operation.review.syntax,
+      'external': operation.review.external,
+    },
+  };
+
+  static ApprovedOperation _restoreApproval(Map<String, dynamic> data) {
+    final review = Map<String, dynamic>.from(data['review'] as Map);
+    return ApprovedOperation(
+      TerminalReview(
+        review['target'] as String,
+        review['tool'] as String,
+        review['text'] as String,
+        review['level'] as String,
+        review['reason'] as String,
+        review['explanation'] as String,
+        review['syntax'] as String,
+        review['external'] == true,
+      ),
+      automatic: data['automatic'] == true,
+    );
+  }
+
+  void restoreConversation(Map<String, dynamic> data) {
+    if (running) throw StateError('不能覆盖运行中的会话');
+    final history = (data['history'] as List)
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
+    final entries = <Object>[];
+    for (final raw in data['log'] as List) {
+      final entry = Map<String, dynamic>.from(raw as Map);
+      switch (entry['type']) {
+        case 'reply':
+          entries.add(
+            AgentText()
+              ..text = entry['text'] as String
+              ..complete = entry['complete'] == true,
+          );
+        case 'tool':
+          entries.add(
+            ToolActivity(entry['name'] as String, entry['target'] as String)
+              ..arguments = entry['arguments'] == null
+                  ? null
+                  : Map<String, dynamic>.from(entry['arguments'] as Map)
+              ..result =
+                  entry['result'] as String? ?? '此工具执行在上次退出时未完成；不会自动重新执行。'
+              ..failed = entry['failed'] == true || entry['result'] == null
+              ..apiFailure = entry['apiFailure'] == null
+                  ? null
+                  : ApiRequestFailure(
+                      entry['apiFailure']['summary'] as String,
+                      entry['apiFailure']['details'] as String,
+                    )
+              ..approval = entry['approval'] == null
+                  ? null
+                  : _restoreApproval(
+                      Map<String, dynamic>.from(entry['approval'] as Map),
+                    ),
+          );
+        case 'error':
+          entries.add(
+            ApiRequestFailure(
+              entry['summary'] as String,
+              entry['details'] as String,
+            ),
+          );
+        case 'approval':
+          entries.add(_restoreApproval(entry));
+        case 'text':
+          entries.add(entry['text'] as String);
+        default:
+          throw const FormatException('未知会话记录类型');
+      }
+    }
+    _history
+      ..clear()
+      ..addAll(history);
+    log
+      ..clear()
+      ..addAll(entries);
+    status = '已恢复历史会话，可以继续输入';
+    notifyListeners();
+  }
+
   /// Keep the conversation name stable as follow-up tasks are added.
   String? get conversationTitle {
     for (final entry in log) {

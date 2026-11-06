@@ -1,4 +1,5 @@
 import 'card_text.dart';
+import 'agent_conversations.dart';
 import 'terminal_approval.dart';
 import 'package:flutter/material.dart';
 import 'api_error_view.dart';
@@ -14,6 +15,7 @@ class InternalAgentView extends StatefulWidget {
   const InternalAgentView({
     super.key,
     required this.agent,
+    required this.conversations,
     required this.task,
     required this.selected,
     required this.select,
@@ -28,6 +30,7 @@ class InternalAgentView extends StatefulWidget {
   final ValueChanged<ModelChoice?> select;
   final VoidCallback configure;
   final InternalAgent agent;
+  final AgentConversations conversations;
   final AppSettings settings;
   final TerminalWorkspace workspace;
   @override
@@ -218,7 +221,12 @@ class _InternalAgentViewState extends State<InternalAgentView> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([widget.agent, widget.agent.approvals]),
+    listenable: Listenable.merge([
+      widget.agent,
+      widget.agent.approvals,
+      widget.workspace,
+      widget.conversations,
+    ]),
     builder: (context, _) {
       final a = widget.agent;
       final review = a.approvals.pending;
@@ -231,6 +239,12 @@ class _InternalAgentViewState extends State<InternalAgentView> {
           : models.firstOrNull;
       final task = widget.task;
       final active = widget.workspace.selected;
+      final conversation = widget.conversations.conversations
+          .where((c) => identical(c.agent, a))
+          .firstOrNull;
+      final bound = conversation == null
+          ? null
+          : widget.conversations.boundTab(conversation.id);
       return CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
@@ -248,8 +262,10 @@ class _InternalAgentViewState extends State<InternalAgentView> {
                   child: LayoutBuilder(
                     builder: (context, body) {
                       const handleHeight = 8.0;
+                      const bindingToolbarHeight = 36.0;
                       final maxHeight =
                           (body.maxHeight -
+                                  bindingToolbarHeight -
                                   handleHeight -
                                   panel.maxHeight / 2 -
                                   6)
@@ -379,6 +395,73 @@ class _InternalAgentViewState extends State<InternalAgentView> {
                                   ),
                                 ],
                               ),
+                            ),
+                          ),
+                          Container(
+                            key: const Key('agent-session-toolbar'),
+                            height: bindingToolbarHeight,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerLow,
+                              border: Border(
+                                top: BorderSide(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.outlineVariant,
+                                ),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Tooltip(
+                                    message: bound == null
+                                        ? '当前会话未绑定 Tab'
+                                        : '当前会话已绑定：${bound.name}（${bound.id}）',
+                                    child: Text(
+                                      bound == null
+                                          ? '会话未绑定 Tab'
+                                          : '已绑定：${bound.name}',
+                                      key: const Key('agent-binding-status'),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                if (bound == null)
+                                  MacButton(
+                                    key: const Key('agent-tab-binding'),
+                                    label: '绑定当前 Tab',
+                                    icon: CupertinoIcons.link,
+                                    toolbar: true,
+                                    tooltip: active == null
+                                        ? '没有激活的 Tab'
+                                        : '将当前会话绑定到 ${active.name}，并解除双方原有绑定',
+                                    onPressed:
+                                        active == null || conversation == null
+                                        ? null
+                                        : () => widget.conversations.bind(
+                                            active,
+                                            conversation.id,
+                                          ),
+                                  )
+                                else
+                                  MacButton(
+                                    key: const Key('agent-tab-unbinding'),
+                                    label: '解绑',
+                                    icon: CupertinoIcons.link_circle,
+                                    toolbar: true,
+                                    tooltip: '解除当前会话与 ${bound.name} 的绑定',
+                                    onPressed: () => widget.conversations
+                                        .unbindConversation(conversation!.id),
+                                  ),
+                              ],
                             ),
                           ),
                           MacSplitHandle(
