@@ -10,6 +10,17 @@ void main() {
     testWidgets('About information and licenses in $brightness', (
       tester,
     ) async {
+      const channel = MethodChannel('terminal_use/lifecycle');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'appVersion' ? '1.2.3+42' : null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
       LicenseRegistry.reset();
       addTearDown(LicenseRegistry.reset);
       final projectLicense = await tester.runAsync(
@@ -19,12 +30,8 @@ void main() {
         () => rootBundle.loadString('assets/fonts/NERD-FONTS-LICENSE.txt'),
       );
       LicenseRegistry.addLicense(() async* {
-        yield LicenseEntryWithLineBreaks([
-          'Terminal Use APP',
-        ], projectLicense!);
-        yield LicenseEntryWithLineBreaks([
-          'Nerd Fonts Symbols',
-        ], fontLicense!);
+        yield LicenseEntryWithLineBreaks(['Terminal Use APP'], projectLicense!);
+        yield LicenseEntryWithLineBreaks(['Nerd Fonts Symbols'], fontLicense!);
       });
       await tester.pumpWidget(
         MaterialApp(
@@ -42,6 +49,7 @@ void main() {
       await tester.tap(find.text('About'));
       await tester.pumpAndSettle();
       expect(find.text('作者：sinri'), findsOneWidget);
+      expect(find.text('版本：1.2.3+42'), findsOneWidget);
       expect(find.text(projectUrl), findsOneWidget);
       expect(find.text('许可证：GNU General Public License v3.0'), findsOneWidget);
       expect(tester.takeException(), isNull);

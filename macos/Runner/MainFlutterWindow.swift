@@ -21,6 +21,9 @@ class MainFlutterWindow: NSWindow {
     AppDelegate.lifecycleChannel?.setMethodCallHandler { call, result in
       if call.method == "installMenus" {
         result((NSApp.delegate as? AppDelegate)?.installWorkspaceMenus() ?? false)
+      } else if call.method == "appVersion" {
+        let info = Bundle.main.infoDictionary ?? [:]
+        result("\(info["CFBundleShortVersionString"] as? String ?? "?")+\(info["CFBundleVersion"] as? String ?? "?")")
       } else if call.method == "openProject" {
         result(NSWorkspace.shared.open(URL(string: "https://github.com/sinri/TerminalUseApp")!))
       } else if call.method == "closeWindow" {

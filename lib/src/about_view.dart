@@ -3,11 +3,23 @@ import 'package:flutter/services.dart';
 
 const projectUrl = 'https://github.com/sinri/TerminalUseApp';
 
+Future<String?> _appVersion() async {
+  try {
+    return await const MethodChannel(
+      'terminal_use/lifecycle',
+    ).invokeMethod<String>('appVersion');
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
 Future<void> showTerminalUseAbout(BuildContext context) => showDialog<void>(
   context: context,
   builder: (context) => AlertDialog(
     title: const Text('Terminal Use APP'),
-    content: const SizedBox(
+    content: SizedBox(
       width: 440,
       child: SingleChildScrollView(
         child: SelectionArea(
@@ -15,19 +27,25 @@ Future<void> showTerminalUseAbout(BuildContext context) => showDialog<void>(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('桌面多终端与运维 Agent 工作区'),
-              SizedBox(height: 16),
-              Text('作者：sinri'),
-              Text('Copyright © 2026 sinri'),
-              SizedBox(height: 16),
-              Text('GitHub 开源项目'),
-              Text(projectUrl),
-              SizedBox(height: 16),
-              Text('许可证：GNU General Public License v3.0'),
-              SizedBox(height: 8),
-              Text('本软件按 GPL v3.0 提供，允许依照许可证使用、修改和再分发，不提供任何担保。'),
-              SizedBox(height: 8),
-              Text(
+              const Text('桌面多终端与运维 Agent 工作区'),
+              FutureBuilder<String?>(
+                future: _appVersion(),
+                builder: (context, snapshot) => snapshot.data == null
+                    ? const SizedBox.shrink()
+                    : Text('版本：${snapshot.data}'),
+              ),
+              const SizedBox(height: 16),
+              const Text('作者：sinri'),
+              const Text('Copyright © 2026 sinri'),
+              const SizedBox(height: 16),
+              const Text('GitHub 开源项目'),
+              const Text(projectUrl),
+              const SizedBox(height: 16),
+              const Text('许可证：GNU General Public License v3.0'),
+              const SizedBox(height: 8),
+              const Text('本软件按 GPL v3.0 提供，允许依照许可证使用、修改和再分发，不提供任何担保。'),
+              const SizedBox(height: 8),
+              const Text(
                 '“许可证与第三方声明”包含本项目及 Flutter、依赖库和 Nerd Fonts Symbols 的完整许可文本。',
               ),
             ],

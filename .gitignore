@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local release artifacts (including notarization receipts)
+/dist/
+*.p12
+*.p8

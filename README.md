@@ -1,5 +1,7 @@
 # Terminal Use
 
+macOS 签名、公证 DMG 与 GitHub Release 流程见 [发行指南](docs/releasing.md)。版本号统一维护于 `pubspec.yaml`，可用 `python3 tools/release/release.py bump patch` 递增。
+
 Flutter 桌面多终端与运维 Agent 工作区。左侧纵向 Tab 管理本地 shell 和 SSH，右侧可运行内置 LLM Agent。HTTP / MCP 使用稳定终端 ID 定向操作；切换 Tab 不改变任务目标。拖动终端和 Agent 之间的分隔条调整宽度。
 
 ## 启动
