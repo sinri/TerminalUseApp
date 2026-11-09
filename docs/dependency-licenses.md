@@ -1,5 +1,7 @@
 # Dependency license review
 
+[文档导航](README.md)
+
 Reviewed on 2026-11-05 against `pubspec.lock`, the resolved local package licenses,
 Flutter 3.47.9 SDK notices, `macos/Podfile.lock`, and the bundled Nerd Fonts license.
 
@@ -76,6 +78,24 @@ identification uses the inherited Flutter LICENSE where appropriate.
 | `webdriver` | 3.2.0 | Apache-2.0 |
 | `xterm` | 4.0.0 | MIT |
 | `zmodem` | 0.0.6 | MIT |
+
+## 2026-11-09 inventory correction
+
+The lockfile also contains the following transitive packages, omitted from the
+original table. Versions were checked against `pubspec.lock` and license labels
+against the resolved local LICENSE texts. This completes the package-name
+inventory; it does not mean every development dependency ships in the app.
+
+| Package | Resolved version | License |
+| --- | --- | --- |
+| `archive` | 4.6.0 | MIT |
+| `args` | 2.7.0 | BSD-3-Clause |
+| `checked_yaml` | 2.0.4 | BSD-3-Clause |
+| `cli_util` | 0.4.2 | BSD-3-Clause |
+| `image` | 4.12.0 | MIT |
+| `json_annotation` | 4.12.0 | BSD-3-Clause |
+| `posix` | 6.5.4 | MIT |
+| `yaml` | 3.1.4 | MIT |
 
 ## Bundled assets and distribution
 

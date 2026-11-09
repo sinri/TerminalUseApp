@@ -1,5 +1,7 @@
 # Vision of Terminal Use App
 
+[文档导航](README.md)
+
 ## Terminal
 
 提供常规命令行终端交互体验。保证 ZSH 等命令行下 Powerline 字符显示正常。

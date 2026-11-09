@@ -48,3 +48,16 @@ app.*.map.json
 /dist/
 *.p12
 *.p8
+
+# User configuration, runtime history and local credentials
+.terminal-use/
+.env
+.env.*
+!.env.example
+/settings.json
+/agent-history.json
+*.pfx
+*.pem
+*.key
+id_rsa
+id_ed25519

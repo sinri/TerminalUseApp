@@ -1,6 +1,9 @@
 # macOS 发行流程
 
+[文档导航](README.md)
+
 发行渠道为 GitHub Release，提供 Developer ID 签名、Apple 公证并 stapler 的 DMG。
+当前已发布 [v1.0.0+1](https://github.com/sinri/TerminalUseApp/releases/tag/v1.0.0%2B1)，仅 arm64。
 脚本：`python3 tools/release/release.py --help`。凭据只保存在本机钥匙串，不提交证书或密码。
 
 ## 一次性准备
@@ -45,7 +48,7 @@ git tag -a v1.0.1+2 -m 'Terminal Use APP 1.0.1+2'
 python3 tools/release/release.py build
 ```
 
-首次发行可以直接使用现有 `1.0.0+1`，提交发行机制后打 `v1.0.0+1` 标签，无须为了发行而强制递增。
+`1.0.0+1` / `v1.0.0+1` 已发行，后续发行应递增版本或 BUILD 并建立新标签；不要移动或复用这个已公开发行的标签。
 
 ## 打包做什么
 
@@ -80,7 +83,13 @@ python3 tools/release/release.py publish 'dist/v1.0.1+2/arm64'
 ```
 
 脚本检查标签/提交及产物校验和，然后生成带自动 release notes 的 GitHub 草稿。人工整理说明，写明系统要求、CPU 架构、已知限制、源码及安装方式。完成安装验收后在 GitHub 点击 Publish release。
-首次发布前确认仓库是公开开源仓库；脚本不更改仓库可见性。
+私有仓库的 Release 只对有访问权限的用户可见；发布 Release 不会自动公开仓库。准备切换为公开仓库前，核对 [公开前检查记录](public-readiness.md)。脚本不更改仓库可见性。
+
+## 公开前的数据检查
+
+检查所有分支、标签和历史提交，不只检查 HEAD；本地配置、历史会话、API Key、私钥、App 专用密码和调试日志均不得上传。需要分享诊断内容时，先检查命令、终端输出和业务文本，不能只依赖自动脱敏。
+
+Developer ID 签名会公开证书持有者名称和 Team ID，构建清单也包含签名身份。这些是公开签名元数据，不是私钥。Git 作者/提交者邮箱同样会随仓库公开。当前首发二进制保留部分本机用户名和构建路径；若需要隐藏，应在下一版签名前剥离调试信息或映射路径，再重新签名、公证和验收。不能直接修改已签名文件。
 
 ## 失败与撤回
 
