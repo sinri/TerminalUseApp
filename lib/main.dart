@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm/xterm.dart';
 import 'src/agent_server.dart';
+import 'src/about_view.dart';
 import 'src/app_theme.dart';
 import 'src/mac_controls.dart';
 import 'src/terminal_session.dart';
@@ -31,6 +32,9 @@ void main() {
   if (kDebugMode) debugPrint('[startup] Dart main entered');
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([
+      'Terminal Use APP',
+    ], await rootBundle.loadString('LICENSE'));
+    yield LicenseEntryWithLineBreaks([
       'Nerd Fonts Symbols',
     ], await rootBundle.loadString('assets/fonts/NERD-FONTS-LICENSE.txt'));
   });
@@ -43,7 +47,7 @@ class TerminalUseApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'Terminal Use',
+    title: 'Terminal Use APP',
     theme: desktopTheme(Brightness.light),
     darkTheme: desktopTheme(Brightness.dark),
     themeMode: ThemeMode.system,
@@ -97,6 +101,8 @@ class _WorkspaceState extends State<Workspace> {
         }
       case 'settings':
         await _openSettings();
+      case 'about':
+        await showTerminalUseAbout(context);
       case 'nextTab':
         _cycleTerminal(1);
       case 'previousTab':

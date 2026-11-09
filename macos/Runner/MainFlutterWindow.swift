@@ -21,6 +21,8 @@ class MainFlutterWindow: NSWindow {
     AppDelegate.lifecycleChannel?.setMethodCallHandler { call, result in
       if call.method == "installMenus" {
         result((NSApp.delegate as? AppDelegate)?.installWorkspaceMenus() ?? false)
+      } else if call.method == "openProject" {
+        result(NSWorkspace.shared.open(URL(string: "https://github.com/sinri/TerminalUseApp")!))
       } else if call.method == "closeWindow" {
         result(nil)
         DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -71,6 +73,6 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
-    self.title = "Terminal Use"
+    self.title = "Terminal Use APP"
   }
 }

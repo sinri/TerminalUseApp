@@ -22,7 +22,14 @@ class AppDelegate: FlutterAppDelegate {
       preferences.target = self
       preferences.action = #selector(openSettings(_:))
     }
-    menu.items.first?.title = "Terminal Use"
+    menu.items.first?.title = "Terminal Use APP"
+    if let about = menu.items.first?.submenu?.items.first(where: {
+      $0.action == #selector(NSApplication.orderFrontStandardAboutPanel(_:))
+    }) {
+      about.title = "关于 Terminal Use APP"
+      about.target = self
+      about.action = #selector(openAbout(_:))
+    }
     if let editMenu = menu.items.first(where: { $0.submenu?.items.contains(where: { $0.action == NSSelectorFromString("paste:") }) == true })?.submenu {
       let editActions: [String: Selector] = ["copy:": #selector(copyText(_:)), "paste:": #selector(pasteText(_:)), "selectAll:": #selector(selectAllText(_:))]
       for item in editMenu.items {
@@ -72,6 +79,7 @@ class AppDelegate: FlutterAppDelegate {
   @objc private func selectAllText(_ sender: Any?) { editAction("selectAll", fallback: "selectAll:", sender: sender) }
 
   @objc private func openSettings(_ sender: Any?) { workspaceAction("settings") }
+  @objc private func openAbout(_ sender: Any?) { workspaceAction("about") }
   @objc private func newTerminal(_ sender: Any?) { workspaceAction("newTerminal") }
   @objc private func closeTab(_ sender: Any?) { workspaceAction("closeTab") }
   @objc private func previousTab(_ sender: Any?) { workspaceAction("previousTab") }
