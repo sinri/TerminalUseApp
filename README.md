@@ -11,9 +11,11 @@
 
 前往 [GitHub Releases](https://github.com/sinri/TerminalUseApp/releases/latest)，下载 DMG，打开后将 **Terminal Use APP** 拖入 **Applications**。
 
-当前发行版为 **1.0.0+1**，支持 **macOS 12.0 或更高版本 / Apple Silicon（arm64）**。安装包已使用 Developer ID 签名，通过 Apple 公证并装订票据。发行附件提供源码、构建清单及 SHA-256 校验和。
+Windows **1.1.0+2** 提供 x64 ZIP 包，完整解压后运行 `terminal_use_app.exe`，保留相邻 DLL 和 data 目录。支持选择 PowerShell、CMD、Git Bash、WSL 和自定义 Shell。设置顶部可打开关于与许可证。
 
-当前没有 Intel、Windows 或 Linux 发行包。普通使用无需安装 Flutter 或 Xcode；SSH 使用系统 OpenSSH，外部 MCP 需要 Python 3。仓库为私有时，下载需要仓库访问权限。
+macOS **1.0.0+1** 支持 **macOS 12.0 或更高版本 / Apple Silicon（arm64）**。DMG 已使用 Developer ID 签名，通过 Apple 公证并装订票据。请在 Releases 中选择对应平台的发行版本。
+
+当前没有 Intel macOS 或 Linux 发行包。普通使用无需安装 Flutter 或 Xcode；SSH 使用系统 OpenSSH，外部 MCP 需要 Python 3。仓库为私有时，下载需要仓库访问权限。
 
 ## 快速上手
 

@@ -11,6 +11,7 @@ import 'src/mac_controls.dart';
 import 'src/terminal_session.dart';
 import 'src/terminal_workspace.dart';
 import 'src/settings.dart';
+import 'src/windows_shell.dart';
 import 'src/ssh_credentials.dart';
 import 'src/settings_view.dart';
 import 'src/internal_agent.dart';
@@ -66,6 +67,8 @@ class _WorkspaceState extends State<Workspace> {
   static const lifecycle = MethodChannel('terminal_use/lifecycle');
   final workspace = TerminalWorkspace();
   final settings = AppSettings();
+  late final windowsShellDiscovery = WindowsShell.discover();
+  final windowsShellMenuKey = GlobalKey();
   late final conversations = AgentConversations(
     workspace,
     settings,
@@ -169,7 +172,13 @@ class _WorkspaceState extends State<Workspace> {
         position.dx,
         position.dy,
       ),
-      items: const [
+      items: [
+        if (Platform.isWindows && tab.windowsShell != null)
+          const PopupMenuItem(
+            height: 28,
+            value: 'duplicate',
+            child: Text('使用相同配置新建终端'),
+          ),
         PopupMenuItem(height: 28, value: 'rename', child: Text('重命名…')),
         PopupMenuItem(
           height: 28,
@@ -186,6 +195,7 @@ class _WorkspaceState extends State<Workspace> {
     );
     if (!mounted || !workspace.tabs.contains(tab)) return;
     if (value == 'rename') await _rename(tab);
+    if (value == 'duplicate') await _newTerminal(null, tab.windowsShell);
     if (value == 'close') _closeTerminal(tab);
     if (value == 'bind-agent') await _showHistory(tab: tab);
     if (value == 'unbind-agent') conversations.bind(tab, null);
@@ -745,7 +755,9 @@ class _WorkspaceState extends State<Workspace> {
                         tooltip: '终端设置',
                         icon: CupertinoIcons.gear,
                         toolbar: true,
-                        onPressed: () => _openSettings(ssh: true),
+                        onPressed: Platform.isWindows
+                            ? _manageWindowsShells
+                            : () => _openSettings(ssh: true),
                       ),
                       MacButton(
                         tooltip: '新建终端',
@@ -753,6 +765,14 @@ class _WorkspaceState extends State<Workspace> {
                         toolbar: true,
                         onPressed: _newTerminal,
                       ),
+                      if (Platform.isWindows)
+                        MacButton(
+                          key: windowsShellMenuKey,
+                          tooltip: '选择本地 Shell',
+                          icon: Icons.expand_more,
+                          toolbar: true,
+                          onPressed: _chooseWindowsShell,
+                        ),
                       MacPopup<SshProfile>(
                         label: '',
                         tooltip: '打开 SSH',
@@ -926,20 +946,209 @@ class _WorkspaceState extends State<Workspace> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _newTerminal([SshProfile? ssh]) async {
+  Future<void> _chooseWindowsShell() async {
+    final shells = [...await windowsShellDiscovery, ...settings.windowsShells];
+    if (!mounted) return;
+    final selected = await showMenu<int>(
+      context: context,
+      positionBuilder: (context, constraints) {
+        final button =
+            windowsShellMenuKey.currentContext!.findRenderObject()!
+                as RenderBox;
+        final overlay =
+            Overlay.of(context).context.findRenderObject()! as RenderBox;
+        final bottomLeft = button.localToGlobal(
+          Offset(0, button.size.height),
+          ancestor: overlay,
+        );
+        return RelativeRect.fromRect(
+          Rect.fromLTWH(bottomLeft.dx, bottomLeft.dy, button.size.width, 0),
+          Offset.zero & overlay.size,
+        );
+      },
+      items: [
+        for (var i = 0; i < shells.length; i++)
+          PopupMenuItem(value: i, child: Text(shells[i].name)),
+        const PopupMenuItem(value: -1, child: Text('管理终端配置')),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    if (selected == -1) {
+      await _manageWindowsShells();
+    } else {
+      await _newTerminal(null, shells[selected]);
+    }
+  }
+
+  Future<void> _manageWindowsShells() async {
+    if (!Platform.isWindows || settingsOpen) return;
+    final discovered = await windowsShellDiscovery;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) {
+          final shells = [...discovered, ...settings.windowsShells];
+          Future<void> save() async {
+            try {
+              await settings.save();
+            } catch (e) {
+              if (mounted) setState(() => error = '$e');
+            }
+            if (context.mounted) update(() {});
+            if (mounted) setState(() {});
+          }
+
+          return AlertDialog(
+            title: const Text('Windows 终端配置'),
+            content: SizedBox(
+              width: 640,
+              height: 400,
+              child: ListView(
+                children: [
+                  for (final shell in shells)
+                    ListTile(
+                      title: Text(shell.name),
+                      subtitle: Text(shell.executable),
+                      trailing: Wrap(
+                        children: [
+                          IconButton(
+                            tooltip: '设为默认',
+                            icon: Icon(
+                              shell.name ==
+                                      (settings.defaultWindowsShell ??
+                                          shells.first.name)
+                                  ? Icons.star
+                                  : Icons.star_border,
+                            ),
+                            onPressed: () async {
+                              settings.defaultWindowsShell = shell.name;
+                              await save();
+                            },
+                          ),
+                          IconButton(
+                            tooltip: '复制并编辑',
+                            icon: const Icon(Icons.copy),
+                            onPressed: () async {
+                              final edited = await editWindowsShell(
+                                context,
+                                shell,
+                              );
+                              if (edited == null) return;
+                              if (shells.any((s) => s.name == edited.name)) {
+                                if (mounted) {
+                                  setState(() => error = '名称已存在，请为复制的配置使用新名称');
+                                }
+                                return;
+                              }
+                              settings.windowsShells.add(edited);
+                              await save();
+                            },
+                          ),
+                          if (settings.windowsShells.contains(shell)) ...[
+                            IconButton(
+                              tooltip: '编辑',
+                              icon: const Icon(Icons.edit),
+                              onPressed: () async {
+                                final edited = await editWindowsShell(
+                                  context,
+                                  shell,
+                                );
+                                if (edited == null) return;
+                                if (shells.any(
+                                  (s) =>
+                                      !identical(s, shell) &&
+                                      s.name == edited.name,
+                                )) {
+                                  if (mounted) setState(() => error = '名称已存在');
+                                  return;
+                                }
+                                settings.windowsShells[settings.windowsShells
+                                        .indexOf(shell)] =
+                                    edited;
+                                if (settings.defaultWindowsShell ==
+                                    shell.name) {
+                                  settings.defaultWindowsShell = edited.name;
+                                }
+                                await save();
+                              },
+                            ),
+                            IconButton(
+                              tooltip: '删除',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () async {
+                                settings.windowsShells.remove(shell);
+                                if (settings.defaultWindowsShell ==
+                                    shell.name) {
+                                  settings.defaultWindowsShell = null;
+                                }
+                                await save();
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  final shell = await editWindowsShell(context);
+                  if (shell == null) return;
+                  if (shells.any((s) => s.name == shell.name)) {
+                    if (mounted) setState(() => error = '名称已存在');
+                    return;
+                  }
+                  settings.windowsShells.add(shell);
+                  await save();
+                },
+                child: const Text('添加自定义配置'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('完成'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _newTerminal([SshProfile? ssh, WindowsShell? localShell]) async {
     if (settingsOpen) return;
     try {
+      if (Platform.isWindows && ssh == null) {
+        final shells = [
+          ...await windowsShellDiscovery,
+          ...settings.windowsShells,
+        ];
+        localShell ??= shells
+            .where((s) => s.name == settings.defaultWindowsShell)
+            .firstOrNull;
+        if (localShell == null && settings.defaultWindowsShell != null) {
+          throw StateError('默认终端不可用，请从下拉菜单选择终端或管理配置');
+        }
+        localShell ??= shells.first;
+      }
       final environment = ssh == null
           ? <String, String>{}
           : await SshCredentials.environment(ssh);
       if (!mounted) return;
       final tab = workspace.add(
-        environment: environment,
-        name: ssh?.name,
-        executable: ssh == null ? null : 'ssh',
-        arguments: ssh?.arguments ?? const [],
+        environment: {...environment, ...?localShell?.environment},
+        name: ssh?.name ?? localShell?.name,
+        executable: ssh == null ? localShell?.executable : 'ssh',
+        arguments: ssh?.arguments ?? localShell?.arguments ?? const [],
+        workingDirectory: localShell?.directory.isNotEmpty == true
+            ? localShell!.directory
+            : null,
+        shellKind: ssh != null ? 'ssh' : localShell?.kind,
       );
       legacyId ??= tab.id;
+      tab.windowsShell = localShell;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _focusTerminal();
       });

@@ -13,6 +13,8 @@ class TerminalSession extends ChangeNotifier {
   bool _disposed = false;
   bool _stopping = false;
   Future<void>? _closing;
+  String? shellKind;
+  String? shellExecutable;
   bool get running => _pty != null && exitCode == null;
   int? get pid => _pty?.pid;
 
@@ -21,6 +23,8 @@ class TerminalSession extends ChangeNotifier {
     String? executable,
     List<String> arguments = const [],
     Map<String, String> environment = const {},
+    String? workingDirectory,
+    String? kind,
   }) {
     if (_pty != null) throw StateError('Session already started');
     final shell = Platform.isWindows
@@ -34,7 +38,12 @@ class TerminalSession extends ChangeNotifier {
     final pty = Pty.start(
       executable ?? shell,
       arguments: executable == null ? args : arguments,
-      workingDirectory: Platform.environment['HOME'] ?? Directory.current.path,
+      workingDirectory:
+          workingDirectory ??
+          (Platform.isWindows
+              ? Platform.environment['USERPROFILE']
+              : Platform.environment['HOME']) ??
+          Directory.current.path,
       environment: {
         ...Platform.environment,
         ...environment,
@@ -45,6 +54,10 @@ class TerminalSession extends ChangeNotifier {
       rows: terminal.viewHeight,
     );
     _pty = pty;
+    shellKind =
+        kind ??
+        (Platform.isWindows && executable == null ? 'powershell' : null);
+    shellExecutable = executable ?? shell;
     _subscription = pty.output
         .cast<List<int>>()
         .transform(const Utf8Decoder(allowMalformed: true))
@@ -119,6 +132,8 @@ class TerminalSession extends ChangeNotifier {
   }
 
   Map<String, dynamic> snapshot() => {
+    if (Platform.isWindows)
+      'shell': {'kind': shellKind ?? 'custom', 'executable': shellExecutable},
     'pid': pid,
     'running': running,
     'exitCode': exitCode,

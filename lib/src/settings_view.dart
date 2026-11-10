@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'mac_controls.dart';
 import 'settings.dart';
+import 'about_view.dart';
 import 'package:flutter/services.dart';
 
 class SettingsView extends StatefulWidget {
@@ -518,6 +519,14 @@ class _SettingsViewState extends State<SettingsView> {
                     },
                   ),
                   const Spacer(),
+                  MacButton(
+                    onPressed: () => showTerminalUseAbout(context),
+                    icon: CupertinoIcons.info,
+                    label: '关于',
+                    toolbar: true,
+                    tooltip: '关于 Terminal Use APP',
+                  ),
+                  const SizedBox(width: 8),
                   MacButton(
                     onPressed: () => Navigator.pop(context),
                     icon: CupertinoIcons.xmark,

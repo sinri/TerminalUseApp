@@ -465,6 +465,7 @@ class InternalAgent extends ChangeNotifier {
             ? null
             : {'id': active.id, 'name': active.name},
         'authorized_tab': {'id': bound.id, 'name': bound.name},
+        if (Platform.isWindows) 'shell': bound.session.snapshot()['shell'],
       });
       final enrichedTask =
           'Terminal context at send time (metadata): $tabContext\n\nUser message:\n$task';

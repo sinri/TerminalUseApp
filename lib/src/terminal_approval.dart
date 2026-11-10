@@ -114,7 +114,12 @@ class TerminalApproval extends ChangeNotifier {
             if (!anthropic) {'role': 'system', 'content': instruction},
             {
               'role': 'user',
-              'content': jsonEncode({'tool': tool, 'input': text}),
+              'content': jsonEncode({
+                'tool': tool,
+                'input': text,
+                if (Platform.isWindows && tab.session.shellExecutable != null)
+                  'shell': tab.session.snapshot()['shell'],
+              }),
             },
           ],
         },

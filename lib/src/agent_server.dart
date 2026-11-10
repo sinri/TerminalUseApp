@@ -50,12 +50,15 @@ class AgentServer {
         response.write(jsonEncode(id == null ? read() : _read(id)));
       } else if (request.method == 'POST' && request.uri.path == '/input') {
         final bytes = <int>[];
+        var oversized = false;
         await for (final chunk in request.timeout(const Duration(seconds: 5))) {
-          bytes.addAll(chunk);
-          if (bytes.length > 65536) {
-            throw const FormatException('Input exceeds 64 KiB');
+          if (!oversized && bytes.length + chunk.length <= 65536) {
+            bytes.addAll(chunk);
+          } else {
+            oversized = true;
           }
         }
+        if (oversized) throw const FormatException('Input exceeds 64 KiB');
         final body = jsonDecode(utf8.decode(bytes));
         if (body is! Map || body['text'] is! String) {
           throw const FormatException('Expected text string');

@@ -56,13 +56,14 @@ void main() {
       await tester.tap(find.text('许可证与第三方声明'));
       await tester.pumpAndSettle();
       expect(find.text('Nerd Fonts Symbols'), findsOneWidget);
+      final dialogSize = tester.getSize(find.byType(Dialog).last);
+      expect(dialogSize.width, lessThan(tester.view.physicalSize.width));
       await tester.tap(find.text('Nerd Fonts Symbols'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.pageBack();
+      await tester.tap(find.byTooltip('关闭许可证'));
       await tester.pumpAndSettle();
-      await tester.pageBack();
-      await tester.pumpAndSettle();
+      expect(find.text('作者：sinri'), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.text('作者：sinri'), findsNothing);

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'api_request.dart';
+import 'windows_shell.dart';
 
 String expandHome(String path) => path.startsWith('~/')
     ? '${Platform.environment['HOME'] ?? '.'}/${path.substring(2)}'
@@ -166,6 +167,8 @@ enum CommandRisk {
 }
 
 class AppSettings {
+  final windowsShells = <WindowsShell>[];
+  String? defaultWindowsShell;
   final autoAllow = <CommandRisk>{};
   final ssh = <SshProfile>[];
   final models = <LlmProfile>[];
@@ -206,6 +209,14 @@ class AppSettings {
         ),
       );
     skillRoot = j['skillRoot'] as String? ?? '';
+    windowsShells
+      ..clear()
+      ..addAll(
+        (j['windowsShells'] as List? ?? []).map(
+          (v) => WindowsShell.fromJson(Map<String, dynamic>.from(v as Map)),
+        ),
+      );
+    defaultWindowsShell = j['defaultWindowsShell'] as String?;
   }
 
   Future<void> save({File? file}) {
@@ -214,6 +225,8 @@ class AppSettings {
       'ssh': ssh.map((v) => v.toJson()).toList(),
       'models': models.map((v) => v.toJson()).toList(),
       'skillRoot': skillRoot,
+      'windowsShells': windowsShells.map((s) => s.toJson()).toList(),
+      'defaultWindowsShell': defaultWindowsShell,
       'autoAllow': autoAllow.map((risk) => risk.name).toList(),
     });
     final saved = _saveQueue.then((_) => _write(target, content));

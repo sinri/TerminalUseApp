@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'terminal_session.dart';
+import 'windows_shell.dart';
 
 class TerminalTab {
   TerminalTab(this.id, this.name, this.session);
@@ -7,6 +8,7 @@ class TerminalTab {
   String name;
   String? agentConversationId;
   final TerminalSession session;
+  WindowsShell? windowsShell;
   Map<String, dynamic> snapshot() => {
     'id': id,
     'name': name,
@@ -26,6 +28,8 @@ class TerminalWorkspace extends ChangeNotifier {
     String? executable,
     List<String> arguments = const [],
     Map<String, String> environment = const {},
+    String? workingDirectory,
+    String? shellKind,
   }) {
     final session = TerminalSession();
     try {
@@ -33,6 +37,8 @@ class TerminalWorkspace extends ChangeNotifier {
         executable: executable,
         arguments: arguments,
         environment: environment,
+        workingDirectory: workingDirectory,
+        kind: shellKind,
       );
     } catch (_) {
       session.dispose();

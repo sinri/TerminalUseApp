@@ -78,10 +78,44 @@ Future<void> showTerminalUseAbout(BuildContext context) => showDialog<void>(
         child: const Text('GitHub 项目'),
       ),
       TextButton(
-        onPressed: () => showLicensePage(
+        onPressed: () => showDialog<void>(
           context: context,
-          applicationName: 'Terminal Use APP',
-          applicationLegalese: 'Copyright © 2026 sinri · GPL v3.0',
+          builder: (dialogContext) => Dialog(
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: 760,
+              height: 560,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('许可证与第三方声明')),
+                        IconButton(
+                          tooltip: '关闭许可证',
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: Navigator(
+                      onGenerateRoute: (_) => MaterialPageRoute<void>(
+                        builder: (_) => const LicensePage(
+                          applicationName: 'Terminal Use APP',
+                          applicationLegalese:
+                              'Copyright © 2026 sinri · GPL v3.0',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
         child: const Text('许可证与第三方声明'),
       ),
