@@ -1,5 +1,10 @@
 # 更新记录
 
+## 1.1.0+3
+
+- 验证 macOS arm64 构建、中文输入、原生剪贴板、快捷键及 PTY/MCP 集成。
+- 更新桌面集成测试定位，避免已有设置和会话历史影响验证。
+
 ## 1.1.0+2
 
 - Windows 支持 PowerShell、CMD、Git Bash、WSL 及自定义 Shell 配置。

@@ -29,6 +29,8 @@ void main() {
   testWidgets('desktop workspace renders', (tester) async {
     await tester.pumpWidget(const TerminalUseApp());
     await tester.pump(const Duration(seconds: 2));
+    await tester.tap(find.byTooltip('新建 Agent 会话'));
+    await tester.pump();
     final send = find.text('发送');
     final input = find.byType(TextField);
     final grip = find.byKey(const Key('agent-input-divider'));
@@ -84,7 +86,7 @@ void main() {
         initialPanel.workspace.selected!.session.snapshot()['text'],
         contains('NATIVE_CLIP_中文'),
       );
-      await tester.tap(find.text('Terminal 1'));
+      await tester.tap(find.byKey(const ValueKey('terminal-1')));
       await tester.pump(const Duration(milliseconds: 100));
       expect(await nativeEdit('selectAll'), isTrue);
       expect(await nativeEdit('copy'), isTrue);
@@ -138,7 +140,7 @@ void main() {
     expect(tester.getTopLeft(find.byTooltip('新建终端')).dx, lessThan(initialX));
     expect(
       tester.getTopLeft(input).dy,
-      greaterThan(tester.getTopLeft(find.text('一起处理终端任务')).dy),
+      greaterThan(tester.getTopLeft(find.byType(InternalAgentView)).dy),
     );
     await tester.drag(
       find.byKey(const Key('panel-divider')),
@@ -148,7 +150,7 @@ void main() {
     expect(tester.getTopLeft(input).dx, lessThan(initialX));
     await tester.tap(find.byTooltip('新建终端'));
     await tester.pump();
-    expect(find.text('Terminal 2'), findsOneWidget);
+    expect(find.byKey(const ValueKey('terminal-2')), findsOneWidget);
     expect(find.text('当前 Tab：Terminal 2（terminal-2）'), findsOneWidget);
     // New-terminal focus is applied after its first frame.
     await tester.pump(const Duration(milliseconds: 100));
@@ -163,9 +165,7 @@ void main() {
       tester.widget<TextField>(input).controller!.text,
       '请检查 @terminal-1 ',
     );
-    await tester.tap(find.byTooltip('打开 SSH'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('管理 SSH 入口'));
+    await tester.tap(find.byTooltip('终端设置'));
     await tester.pumpAndSettle();
     expect(find.text('添加 SSH 入口'), findsOneWidget);
     expect(find.text('添加 LLM 配置'), findsNothing);
@@ -177,6 +177,8 @@ void main() {
     expect(find.text('添加 SSH 入口'), findsNothing);
     await tester.tap(find.byTooltip('关闭设置'));
     await tester.pumpAndSettle();
+    await tester.tap(input);
+    await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.comma);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -197,7 +199,7 @@ void main() {
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
     await tester.pump();
-    await tester.tap(find.text('Terminal 1'));
+    await tester.tap(find.byKey(const ValueKey('terminal-1')));
     await tester.pump();
     await tester.tap(find.byTooltip('关闭 Terminal 1'));
     await tester.pump();
@@ -216,9 +218,13 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.tap(find.byTooltip('新建终端'));
     await tester.pump();
+    await tester.tap(find.byTooltip('新建 Agent 会话'));
+    await tester.pump();
     final panel = tester.widget<InternalAgentView>(
       find.byType(InternalAgentView),
     );
+    // The approval scenario must not inherit this Mac's saved auto-allow rules.
+    panel.settings.autoAllow.clear();
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
       await request.drain<void>();
