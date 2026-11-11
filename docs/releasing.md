@@ -3,7 +3,7 @@
 [文档导航](README.md)
 
 发行渠道为 GitHub Release，提供 Developer ID 签名、Apple 公证并 stapler 的 DMG。
-当前已发布 [v1.0.0+1](https://github.com/sinri/TerminalUseApp/releases/tag/v1.0.0%2B1)，仅 arm64。
+当前已发布 [v1.1.0+3](https://github.com/sinri/TerminalUseApp/releases/tag/v1.1.0%2B3)，仅 arm64。
 脚本：`python3 tools/release/release.py --help`。凭据只保存在本机钥匙串，不提交证书或密码。
 
 ## 一次性准备
@@ -33,7 +33,9 @@
 
 唯一来源是 `pubspec.yaml` 的 `version: MAJOR.MINOR.PATCH+BUILD`。
 每次递增都让 BUILD 加 1；major/minor 会重置其下级版本。`build` 用于相同语义版本的重新发行。
-Git 标签包含完整版本，例如 `v1.0.1+2`，避免同版本重新打包的歧义。脚本不会自动提交或打标签。
+Git 标签包含完整版本，例如 `v1.1.1+4`，避免同版本重新打包的歧义。脚本不会自动提交或打标签。
+
+以下以从 `1.1.0+3` 递增 PATCH 到 `1.1.1+4` 为例：
 
 ```sh
 python3 tools/release/release.py version
@@ -43,12 +45,12 @@ flutter analyze
 flutter test
 python3 -m unittest discover -s tools/release -p 'test_*.py'
 git add pubspec.yaml CHANGELOG.md
-git commit -m 'Release 1.0.1+2'
-git tag -a v1.0.1+2 -m 'Terminal Use APP 1.0.1+2'
+git commit -m 'Release 1.1.1+4'
+git tag -a v1.1.1+4 -m 'Terminal Use APP 1.1.1+4'
 python3 tools/release/release.py build
 ```
 
-`1.0.0+1` / `v1.0.0+1` 已发行，后续发行应递增版本或 BUILD 并建立新标签；不要移动或复用这个已公开发行的标签。
+`1.1.0+3` / `v1.1.0+3` 已发行，后续发行应递增版本或 BUILD 并建立新标签；不要移动或复用这个已公开发行的标签。
 
 ## 打包做什么
 
@@ -79,7 +81,7 @@ macOS 最低版本当前配置为 12.0；升级 Flutter 后需要重新确认最
 上传为草稿（会推送当前标签，**不会公开发布**）：
 
 ```sh
-python3 tools/release/release.py publish 'dist/v1.0.1+2/arm64'
+python3 tools/release/release.py publish 'dist/v1.1.1+4/arm64'
 ```
 
 脚本检查标签/提交及产物校验和，然后生成带自动 release notes 的 GitHub 草稿。人工整理说明，写明系统要求、CPU 架构、已知限制、源码及安装方式。完成安装验收后在 GitHub 点击 Publish release。
